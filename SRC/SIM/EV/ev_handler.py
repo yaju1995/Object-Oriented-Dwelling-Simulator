@@ -34,7 +34,7 @@ class EVHandler(ESSHandler):
 
         in_eff: float = 1.0,
         out_eff: float = 1.0,
-        seed:int= 0
+        seed:int= 42
     ):
         # -------------------------------------------------
         # Load EV profile
@@ -42,7 +42,7 @@ class EVHandler(ESSHandler):
         self.ev_df = generate_ev_sessions(ev_profile_csv,
                                           start_time,resolution,duration,
                                           seed=seed)
-        # print(self.ev_df)
+        # logger.commandline(self.ev_df)
         self._validate_ev_profile()
 
         # -------------------------------------------------
@@ -83,11 +83,13 @@ class EVHandler(ESSHandler):
         if missing:
             raise ValueError(f"EV profile missing columns: {missing}")
 
-        if not pd.api.types.is_datetime64_any_dtype(self.ev_df["plug_in_time"]):
-            raise TypeError("plug_in_time must be datetime")
-
-        if not pd.api.types.is_datetime64_any_dtype(self.ev_df["plug_out_time"]):
-            raise TypeError("plug_out_time must be datetime")
+        # Validation: allow datetime dtype OR all-null column
+        for col in ["plug_in_time", "plug_out_time"]:
+            series = self.ev_df[col]
+            if not pd.api.types.is_datetime64_any_dtype(series):
+                # If dtype is not datetime, check if all values are None/NaT
+                if not series.isna().all():
+                    raise TypeError(f"{col} must be datetime or None")
 
         if (self.ev_df["plug_out_time"] <= self.ev_df["plug_in_time"]).any():
             raise ValueError("plug_out_time must be after plug_in_time")
@@ -117,7 +119,7 @@ class EVHandler(ESSHandler):
     def step(
             self,
             timestamp: datetime,
-            control_power_W: Optional[float] = None,
+            control_power_W: Optional[float] = 0,
     ) -> dict:
         """
         Advance EV by one timestep.
@@ -168,7 +170,7 @@ class EVHandler(ESSHandler):
             power_setpoint_W = 0.0
         else:
             if control_power_W is None:
-                power_setpoint_W = self.charging_power_W # charge with max power
+                power_setpoint_W = 0 # charge with 0 power
             else:
                 power_setpoint_W = float(control_power_W)
 
@@ -184,10 +186,12 @@ class EVHandler(ESSHandler):
         )
 
         ev_power_kw = out["Battery Electric Power (kW)"]
+        ev_set_power_kw = out["Battery Set Power (kW)"]
         ev_soc = out["Battery SOC (-)"] if plugged else 0.0
-
+        # print(control_power_W)
         return {
             "EV Electric Power (kW)": round(ev_power_kw, 6),
+            "EV Set Power (kW)": round(ev_set_power_kw,6),
             "EV SOC (-)": round(ev_soc, 6),
             "EV Parked": int(plugged),
         }

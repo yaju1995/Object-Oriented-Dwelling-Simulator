@@ -19,7 +19,14 @@ def generate_ev_sessions(
     day_id, start_time (minute-of-day), duration (minutes),
     start_soc, weekday (1/0), temperature
     """
-
+    OUT_COLS = [
+        "plug_in_time",
+        "plug_out_time",
+        "initial_soc",
+        "temperature",
+        "day_id",
+        "weekday",
+    ]
     rng = np.random.default_rng(seed)
 
     df_src = pd.read_csv(csv_path)
@@ -48,8 +55,9 @@ def generate_ev_sessions(
 
     events = []
     last_plug_out = None
-
+    # print(f'Days {days}')
     for day in days:
+        # print(f'day {day}')
         day_dt = day.to_pydatetime()
         is_weekday = 1 if day_dt.weekday() < 5 else 0
 
@@ -109,9 +117,11 @@ def generate_ev_sessions(
         )
 
         last_plug_out = plug_out_time
-
+    # ✅ Always return a DataFrame with expected schema
+    if not events:
+        return pd.DataFrame(columns=OUT_COLS)
     return (
-        pd.DataFrame(events)
+        pd.DataFrame(events, columns=OUT_COLS)
         .sort_values("plug_in_time")
         .reset_index(drop=True)
     )

@@ -1,8 +1,5 @@
-import matplotlib.pyplot as plt
-
-from SRC.SIM.data_generators import PatternGenerationHandler
+from SRC.SIM.DataGenerator.data_generators import PatternGenerationHandler
 from datetime import datetime, timedelta
-from matplotlib.pyplot import plot
 
 handler = PatternGenerationHandler(
     model_name="normal",

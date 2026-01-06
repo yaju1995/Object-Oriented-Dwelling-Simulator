@@ -1,14 +1,15 @@
 import logging
 import numpy as np
+from datetime import datetime, timedelta
+import pandas as pd
 
 from SRC.SIM.Simulator import dwelling
 from SRC.SIM.ESS.ess_handler import ESSHandler
 from SRC.SIM.EV.ev_handler import EVHandler
 from SRC.SIM.Thermal.thermal_handler import ThermalHandler
 
-from datetime import datetime, timedelta
 
-RESOLUTION = timedelta(minutes=15)
+RESOLUTION = timedelta(minutes=1)
 START_TIME = datetime(2018,1,1)
 DURATION = timedelta(days=5)
 ##################################################################################################
@@ -37,17 +38,21 @@ thermal_config = {
     'n': 0.95
 }
 
+# demand_config = {
+#     'model': 'normal',
+#     'file': './SRC/SIM/Defaults/Demand/15_min_normal_test.csv'
+# }
 demand_config = {
-    'model': 'normal',
-    'file': './SRC/SIM/Defaults/Demand/15_min_normal_test.csv'
+    'model': 'uniform',
+    'file': './SRC/SIM/Defaults/Demand/60_min_uniform.csv'
 }
 
 weather_file = './SRC/SIM/Defaults/Weather/IRL_Dublin.039690_IWEC.epw'
 
 pv_config = {
-    "capacity kW": 5,
+    "capacity W": 5000,
     "efficiency": 0.95,
-    "area per kW":1,
+    "area per W":1,
     "tilt": 20,
     "azimuth": 0,
 }
@@ -92,6 +97,9 @@ House = dwelling(name='H1',start_time=START_TIME,
 
 ##################################################################################################
 
+House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/halfhourly_tariff_example.csv')
+House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/halfhourly_tariff_example.csv')
+
 House.initialized_df()
 print(House.simulation_df.head())
 print(House.simulation_df.keys())
@@ -126,11 +134,13 @@ for t in range(steps - 1):
     if status.get(EV[0]):
         ev_power = 5000
     # Thermal control enable
-    # get action based on the first state
+    # get action based on the first state///
     control = {'Battery': {'P Setpoint': 1000},
                'EV': {'Max Power': ev_power},
                'HVAC Heating':{'P Setpoint': hvac_power}}
-    status = House.update(control)
+    # status = House.update(control)
+    inverter, meter, ev, hvac, status = House.step(control)
+    # print(inverter)
 
     # print(status.get(INVERTER[1], 0))
     # print(status.get(INVERTER[2], 0))

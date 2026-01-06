@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from SRC.SIM.epwHandler import EPWWeatherHandler
+from SRC.SIM.Weather.epwHandler import EPWWeatherHandler
 handler = EPWWeatherHandler("./Data/Weather/IRL_Dublin.039690_IWEC.epw")
 
 start = datetime(2018, 3, 1)

@@ -47,12 +47,12 @@ class tariffHandler:
         '''
         pass
 
-    def upload_tariff(self, file):
+    def upload_tariff(self, file: str):
         tariff = pd.read_csv(file, index_col=0)  #
         tariff.index = pd.to_datetime(tariff.index, format="%H:%M:%S").time
         self.tariff = tariff
 
-    def upload_feed_tariff(self, file):
+    def upload_feed_tariff(self, file: str):
         tariff = pd.read_csv(file, index_col=0)  #
         tariff.index = pd.to_datetime(tariff.index, format="%H:%M:%S").time
         self.feed_tariff = tariff
@@ -66,9 +66,9 @@ class tariffHandler:
             tariff = get_active_period_value(self.tariff, now_time)
         if self.feed_tariff is not None:
             feed_tariff = get_active_period_value(self.feed_tariff, now_time)
-        return tariff, feed_tariff
+        return float(tariff), float(feed_tariff)
 
-    def get_tariff_range_df(self, now_time, period=4, resolution=15):
+    def get_tariff_range_df(self, now_time, period=4, resolution: timedelta = timedelta(minutes=15)):
         """
         Returns a DataFrame of tariff & feed-in tariff for the next N steps.
 
@@ -90,7 +90,7 @@ class tariffHandler:
             tariff_list.append(t)
             feed_tariff_list.append(f)
 
-            current_time += timedelta(minutes=resolution)
+            current_time += resolution
 
         df = pd.DataFrame({
             "tariff": tariff_list,

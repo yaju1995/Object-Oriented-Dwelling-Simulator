@@ -193,6 +193,7 @@ class ESSHandler:
         return {
             'Battery SOC (-)': round(self.getStateOfCharge() / 100.0, 6),
             'Battery Electric Power (kW)': round(actual_power_W / 1000.0, 6),
+            'Battery Set Power (kW)': round(power_setpoint_W/1000, 6)
         }
 
     # ------------------------------------------------------------------
