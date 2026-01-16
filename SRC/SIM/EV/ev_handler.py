@@ -192,7 +192,7 @@ class EVHandler(ESSHandler):
         return {
             "EV Electric Power (kW)": round(ev_power_kw, 6),
             "EV Set Power (kW)": round(ev_set_power_kw,6),
-            "EV SOC (-)": round(ev_soc, 6),
+            "EV SOC (-)": round(ev_soc, 3),
             "EV Parked": int(plugged),
         }
 

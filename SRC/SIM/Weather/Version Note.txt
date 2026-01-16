@@ -1,0 +1,4 @@
+V_1_0_1: Very basic not error or missing data handling
+V_1_0_2: Missing data handling by stitching
+V_1_0_3: Update to version _0_2 with masking when require data length exceeds the df data length
+            wrap_year=True added to wrap until the require data length is reached

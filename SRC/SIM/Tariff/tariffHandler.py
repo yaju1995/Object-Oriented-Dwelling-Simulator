@@ -34,7 +34,11 @@ class tariffHandler:
         self.feed_tariff_model = feed_tariff_model
 
         self.tariff = None
+        self.max_tariff = None
+        self.min_tariff = None
         self.feed_tariff = None
+        self.max_feed_tariff = None
+        self.min_feed_tariff = None
 
     def generate_tariff(self, model=None):
         '''
@@ -51,13 +55,18 @@ class tariffHandler:
         tariff = pd.read_csv(file, index_col=0)  #
         tariff.index = pd.to_datetime(tariff.index, format="%H:%M:%S").time
         self.tariff = tariff
+        self.max_tariff = self.tariff['value'].max()
+        self.min_tariff = self.tariff['value'].min()
 
     def upload_feed_tariff(self, file: str):
         tariff = pd.read_csv(file, index_col=0)  #
         tariff.index = pd.to_datetime(tariff.index, format="%H:%M:%S").time
         self.feed_tariff = tariff
+        self.max_feed_tariff = self.feed_tariff['value'].max()
+        self.min_feed_tariff = self.feed_tariff['value'].min()
 
     def get_tariff(self, now_time):
+        # print(type(now_time))
         tariff = 0.0
         feed_tariff = 0.0
         if self.tariff_model:

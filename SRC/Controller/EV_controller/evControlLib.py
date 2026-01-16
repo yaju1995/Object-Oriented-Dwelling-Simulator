@@ -1,22 +1,66 @@
+import datetime
+
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, datetime
 
-from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent, DDPGConfig
+# from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent
+from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent
 from SRC.support.lib_config import CustomLogger
-from SRC.SIM.EquipmentClass import EVModel
+from SRC.SIM.EquipmentClass import EVModel, pv
 from SRC.Controller.Database.PandasDatabase import DataStore
-
+from SRC.support.live_plotter import LivePlotter, LivePlotter4
 
 from SRC.SIM.Tariff.tariffHandler import tariffHandler
 
+# Spare Reward Handling
+from collections import deque
+from dataclasses import dataclass
 
-logger = CustomLogger(command=True, color='green')
 
+@dataclass
+class RL_Tuple:
+    state_old: list
+    action: float
+    reward: float
+    state_new: list
+    done: bool
+
+
+# Create deque with max length HORIZON
+LOOK_AHEAD = 4
+trending_state = deque(maxlen=LOOK_AHEAD)
+
+
+def add_step(step_info):
+    trending_state.append(step_info)
+
+    # When deque is full, sum rewards and add to first step's reward
+    if len(trending_state) == trending_state.maxlen:
+        # print('summing reward')
+        total_reward = 0
+        for step in trending_state:
+            total_reward += step.reward
+
+        # total_reward = sum(step.reward for step in trending_state)
+        # Add total_reward to first step's reward (in-place)
+        # trending_state[0].reward += 0.5*total_reward
+        trending_state[0].reward = trending_state[0].reward + (1 / LOOK_AHEAD) * total_reward
+        return trending_state[0]
+
+
+##############################
+logger = CustomLogger(command=False, color='green')
+
+
+##############################
 
 class ev_controller:
-    def __init__(self, rl_agent: DDPGAgent, resolution:timedelta(minutes=1),update_period:timedelta= timedelta(minutes=30),
-                 global_database:DataStore = None):
+    def __init__(self, rl_agent: DDPGAgent, resolution: timedelta(minutes=1),
+                 update_period: timedelta = timedelta(minutes=30),
+                 global_database: DataStore = None):
+
+        self.ev_status = 0
         self.global_database = global_database
         self.max_charging_power = 7
         self.connection_status = False
@@ -24,8 +68,8 @@ class ev_controller:
         self.leave_time = None
         self.full_charge_time = None
         self.connect_period = None
-        self.resolution:timedelta = resolution
-        self.update_period = update_period
+        self.resolution: timedelta = resolution
+        self.update_period: timedelta = update_period
         self.initial_soc = None
         self.final_soc = None
         self.full_charge_status = False
@@ -39,23 +83,44 @@ class ev_controller:
         self.reward = None
         self.next_state = None
         self.done = False
+
+        self.cumulative_reward = 0
+
+        self.nom_period_charging_cost = 0  # reward variable
+        self.step_count = 0
         ######################################################
         self.update_time = None
         # self.now_time = None
         self.instant_power = 0
         self.instant_soc = 0
+        self.instant_tariff = None
         self.period_charging_energy = 0
         self.period_charging_cost = 0
         self.ev_sessions_charging_energy = 0
         self.ev_sessions_charging_cost = 0
         self.ev_df = pd.DataFrame()
-        self.set_charging_power = 1.5 # charge with minimal power
+        self.set_charging_power = 1.5  # charge with minimal power
         self.ev_sessions = 0
+        self.not_full_count = 0
         ######################################################
         self.tariff_handler = tariffHandler()
         self.data_storage = None
         ######################################################
-        self.plotter = None
+        self.total_ev_charging_cost = 0
+        self.total_ev_charging_energy = 0
+        self.unsatified_energy = 0
+        self.satisfied_energy = 0
+        self.initial_soc_list = []
+        self.final_soc_list = []
+        self.duration_list = []
+        self.multiPlotter = LivePlotter4(['Cost per kWh','change SoC','Final SOC','None' ],
+                                         xlabels=['Episode','Episode','Episode','None'],
+                                         ylabels=['$/kWh','SoC/min','SOC%', 'None'])
+        # self.plotter1 = LivePlotter('Cost per kWh', 'Episode', '$/kWh')
+        # self.plotter2 = LivePlotter('change SoC', 'Episode', 'SoC/min')
+        # self.plotter3 = LivePlotter('Final SOC', 'Episode', 'SOC')
+        self.enable_plotter = True
+
 
     def update_status(self, ev_info: EVModel):
 
@@ -65,11 +130,13 @@ class ev_controller:
         )
 
         tariff, feed_tariff = self.tariff_handler.get_tariff(ev_info.time)
+        self.instant_tariff = tariff
         # ===============================================================
         #   HANDLE CONNECTION / DISCONNECTION EVENTS
         # ===============================================================
+        self.ev_status = ev_info.ev_status
         if ev_info.ev_status:  # EV is connected
-            if not self.connection_status:  # just now connected
+            if not self.connection_status:  # just now connected initialize session
                 logger.commandline(f"Car connected {ev_info.time}")
                 self.connection_status = True
                 self.ev_sessions += 1
@@ -81,28 +148,52 @@ class ev_controller:
                 self.ev_sessions_charging_cost = 0
                 self.initial_soc = ev_info.ev_soc
 
+
         else:  # EV is not connected
-            if self.connection_status:  # just disconnected
+            if self.connection_status:  # just disconnected end session
                 # Print disconnection header
                 logger.commandline(f"Car disconnected at {ev_info.time}")
                 logger.commandline(f"Final reading → Power: {ev_info.ev_power:.2f} kW, SOC: {ev_info.ev_soc:.1f}%")
 
                 self.connection_status = False
+                self.done = False
                 self.leave_time = ev_info.time
                 self.final_soc = self.instant_soc
+                self.set_charging_power = 1.5  # reset the set_charging power to 1.5
 
                 # --- FORCE FINAL REWARD FOR LAST ACTION ---
-                self.control_logic(ev_info.time, True)
+                now_time = ev_info.time
+                next_time = now_time + self.resolution
+                self.control_logic(next_time, True)
+                # --- Don't force reward as it not complete just drop all action ---
+                # self.state = None
+                # self.action = None
+                # self.reward = None
+                # self.next_state = None
+                # self.action = 0
 
                 # --- PRINT SESSION SUMMARY ---
                 session_duration = self.leave_time - self.connect_time
                 session_minutes = int(session_duration.total_seconds() // 60)
+                soc_change_rate = (self.final_soc * 100 - self.initial_soc * 100) / session_minutes
                 if self.full_charge_status:
                     full_charge_duration = self.full_charge_time - self.connect_time
-                    full_charge_minutes = f'{int(full_charge_duration.total_seconds() // 60)} minutes'
+                    full_charge_minutes = int(full_charge_duration.total_seconds() // 60)
+                    soc_change_rate = (self.final_soc * 100 - self.initial_soc * 100) / full_charge_minutes
                 else:
+                    self.not_full_count += 1
                     full_charge_minutes = 'Not fully charged'
-
+                self.initial_soc_list.append(self.initial_soc)
+                self.final_soc_list.append(self.final_soc)
+                self.unsatified_energy += (1 - self.final_soc)
+                self.satisfied_energy += self.final_soc
+                self.duration_list.append(session_minutes)
+                if self.enable_plotter:
+                    self.multiPlotter.update([self.ev_sessions_charging_cost / self.ev_sessions_charging_energy,
+                                              soc_change_rate,self.final_soc*100,0])
+                    # self.plotter1.update(self.ev_sessions_charging_cost / self.ev_sessions_charging_energy)
+                    # self.plotter2.update(soc_change_rate)
+                    # self.plotter3.update(self.final_soc*100)
                 summary = (
                     "\n===== EV Charging Session Summary =====\n"
                     f"Arrival time:    {self.connect_time}\n"
@@ -111,25 +202,27 @@ class ev_controller:
                     f"Initial SOC:     {self.initial_soc * 100:.1f}%\n"
                     f"Final SOC:       {self.final_soc * 100:.1f}%\n"
                     f"Energy charged:  {self.ev_sessions_charging_energy:.3f} kWh\n"
-                    f"Total cost:      £{self.ev_sessions_charging_cost:.3f}\n"
-                    f"Time to full:    {full_charge_minutes}\n"
+                    f"Total cost:      €{self.ev_sessions_charging_cost:.3f}\n"
+                    f"Time to full:    {full_charge_minutes} minutes\n"
                     f"Data points:     {len(self.ev_df)}\n"
+                    f"SOC Rate change: {soc_change_rate}\n"
                     "=======================================\n"
                 )
 
                 logger.commandline(summary)
 
-            return None # If EV not connected return None
+            return None  # If EV not connected return None
         # ===============================================================
         #   EV IS CONNECTED → UPDATE METRICS
         # ===============================================================
+        self.step_count += 1
         # Update instantaneous state
         self.instant_power = ev_info.ev_power
         self.instant_soc = ev_info.ev_soc
         self.connect_period = ev_info.time - self.connect_time
 
         if self.instant_soc >= 1:
-            self.full_charge_status = True # if full charged complete a cycle
+            self.full_charge_status = True  # if full charged complete a cycle
             self.full_charge_time = ev_info.time
             # logger.commandline('EV Full charged !')
         else:
@@ -137,50 +230,57 @@ class ev_controller:
 
         # --- Compute incremental energy PER STEP ---
         # Energy [kWh] = kW * (minutes / 60)
-        step_energy = self.instant_power * (self.resolution.total_seconds()/ 3600)
+        step_energy = round(self.instant_power * (self.resolution.total_seconds() / 3600), 6)
         # logger.commandline(self.resolution, self.resolution.total_seconds()/ 3600)
+
         self.period_charging_energy += step_energy
         self.ev_sessions_charging_energy += step_energy
-
+        self.total_ev_charging_energy += step_energy
         # Cost ONLY for this step:
-        self.period_charging_cost += step_energy * tariff
-        self.ev_sessions_charging_cost += step_energy * tariff
+        self.period_charging_cost += round(step_energy * tariff, 6)
+        self.ev_sessions_charging_cost += round(step_energy * tariff, 6)
+        self.total_ev_charging_cost += round(step_energy * tariff, 6)
+
+        sim_cont_ration = self.update_period.total_seconds() / self.resolution.total_seconds()
+        tariff_normal = ((tariff - self.tariff_handler.min_tariff) /
+                         (self.tariff_handler.max_tariff - self.tariff_handler.min_tariff))
+        period_energy_normal = (step_energy / (self.max_charging_power * (self.resolution.total_seconds() / 3600)))
+        # print(tariff_normal, tariff, self.tariff_handler.max_tariff, self.tariff_handler.min_tariff)
+        self.nom_period_charging_cost += (round(period_energy_normal * tariff_normal,
+                                                6)) / sim_cont_ration
+
 
         # ===============================================================
         #   CONTROL UPDATE CHECK
         # ===============================================================
         # to do update in 14-min
-        # period_minutes = int(self.update_period.total_seconds() // 60)
-        # do_ev_update = (ev_info.time.minute % period_minutes == period_minutes - 1)
         # Update only when time aligns with resolution (e.g., 15 min)
         now_time = ev_info.time
         next_time = now_time + self.resolution
-        do_update = (next_time.minute % (self.update_period.total_seconds()//60) == 0)
+        do_update = (next_time.minute % (self.update_period.total_seconds() // 60) == 0)
 
-        # based on time delta
-        # First update always allowed
-        # if self.update_time is None:
-        #     do_update = True
-        # else:
-        #     update_period = ev_info.time - self.update_time
-        #     do_update = ev_info.time - self.update_time
-
-        if do_update:
+        if do_update:  # every 15 or 30 mins update
             # Apply control logic
             self.update_time = ev_info.time
-            logger.commandline(f'Updating control signal using RL: {ev_info.time} {do_update}')
+            # logger.commandline(f'Updating control signal using RL: \n'
+            #                    f'at time  : {now_time} \n'
+            #                    f'from time: {next_time}')
 
             self.control_logic(next_time, False)  # Update charging power using controller
+            # if fully charged it return, no action and reset all
 
             self.set_charging_power = self.action * self.max_charging_power
 
             # Reset period accumulators
-            self.period_charging_energy = 0
-            self.period_charging_cost = 0
+            # logger.commandline(f'period charging cost: {self.period_charging_cost}')
+            self.period_charging_energy = 0.0
+            self.period_charging_cost = 0.0
+            self.nom_period_charging_cost = 0
+            self.step_count = 0
 
-        return self.set_charging_power # return in kW
+        return self.set_charging_power  # return in kW
 
-    def control_logic(self, control_time, done):  # ddpg logic
+    def control_logic(self, control_time: datetime, done):  # ddpg logic
         '''
         Upadate self.action,
         :param control_time:
@@ -193,19 +293,30 @@ class ev_controller:
         # If we have a previous state-action pair, compute reward and update RL
         # ==========================================================
         if self.state is not None and self.action is not None:
-            self.next_state = self.get_state(control_time)
-
+            # Get reward
             reward = self.compute_reward()
 
+            self.cumulative_reward += reward
+            # if self.enable_plotter:
+            #     self.plotter.update(reward)
+
+            # Get next state #
+            self.next_state = self.get_state(control_time)
+
             # Save transition (terminal or non-terminal)
-            self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, done)
-            # logger.commandline('Training RL agent!!')
-            # logger.commandline(self.state, self.action, reward, self.next_state, done)
+            # pass to deque for delay reward update, update reward then add to agent store
+            self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, False)
+
+            logger.commandline(control_time, self.state, self.action, reward, self.next_state, done)
+
+            # Train agent
+            # if update ready then only at the end of the session
             self.rl_agent.train()
 
         # Check is the charge is disconnected : if so the set action = 0
         if done:
-            # reset action to 0
+            # compute reward and end
+            # reset all state, reward, and action to None and set action to 0
             self.state = None
             self.action = None
             self.reward = None
@@ -215,18 +326,23 @@ class ev_controller:
         # ==========================================================
         # Update state for next action
         # ==========================================================
-        self.state = self.get_state(control_time)
-        logger.commandline(f'Getting States {self.state}')
+        if self.next_state is not None:
+            self.state = self.next_state
+        else:
+            self.state = self.get_state(control_time)
+        # logger.commandline(f'Getting States {self.state}')
 
         # ==========================================================
         # Choose next action [update self.action]
         # ==========================================================
 
         self.action = self.rl_agent.choose_action(self.state, noise_std=0.1)
-        logger.commandline(f'Getting action {self.action}')
+        if self.full_charge_status:
+            self.action = np.array([0])
+        # logger.commandline(f'Getting action {self.action}')
         return
 
-    def get_state(self,control_time):
+    def get_state(self, control_time: datetime):
         """
         Get info from storage
         control_time is the next time period (15.59 now time the control time 15.59 + timedelta(resolution)
@@ -255,13 +371,24 @@ class ev_controller:
         ##################################################################
         # Normalized SOC (0–1)
         soc = self.instant_soc
-        # next period tariff
-        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_df(control_time, period=3, resolution=self.resolution)
-        # print(f'tariff: {tariff_states}\n'
-        #       f'feed: {feed_tariff_states}')
-        # Charging duration in minutes → normalize by 720 (12 hours)
-        # time to full charge
 
+        # next period oven period tariff
+        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_df(control_time, period=4,
+                                                                                    resolution=self.update_period)
+        tariff_states = np.array(tariff_states)
+        tariff_max = self.tariff_handler.max_tariff
+        tariff_min = self.tariff_handler.min_tariff
+
+        tariff = (tariff_states - tariff_min) / (tariff_max - tariff_min)  # Normalized over max and min
+
+        # Get time
+        control_minutes = control_time.hour * 60 + control_time.minute
+        angle = 2 * np.pi * (control_minutes / (24 * 60))
+
+        sin_time = np.sin(angle)
+        cos_time = np.cos(angle)
+
+        # time to full charge
         if self.connect_period is None:
             connect_minutes = 0
         else:
@@ -269,11 +396,11 @@ class ev_controller:
 
         connect_norm = connect_minutes / 1440  # ~0–1 given a 24 hrs
 
-         # Additional possible inputs: tariff, time of day, remaining time estimate ...
+        # Additional possible inputs: tariff, time of day, remaining time estimate ...
         # Finalize the EV states
         # Time of day min
         # Weekday and weekend
-        return np.array([soc, *tariff_states, connect_norm], dtype=float)
+        return np.array([soc, self.ev_status, *tariff, sin_time, cos_time], dtype=float)
 
     def compute_reward(self):
         """
@@ -285,17 +412,23 @@ class ev_controller:
         connect_minutes = int(self.connect_period.total_seconds() // 60)
 
         # SOC reward (0–1)
-        soc_term = self.instant_soc / 100.0
-
+        soc_term = self.instant_soc  # last SOC,
+        satisfaction = -(1 - soc_term * 1)
         # Normalize time penalty (0–1 roughly)
         time_penalty = 0.01 * connect_minutes
 
         # Charging cost penalty (incremental for the period)
-        cost_penalty = self.period_charging_cost
-
-        reward = soc_term - time_penalty - cost_penalty
-
+        cost_penalty = -round(self.nom_period_charging_cost, 3)
+        # print(cost_penalty, satisfaction)
+        # energy_norm = (self.period_charging_energy/self.max_charging_power)
+        # tariff_norm = self.instant_tariff
+        # reward = soc_term - time_penalty - cost_penalty
+        w1 = 0.5
+        reward = (1 - w1) * satisfaction + w1 * cost_penalty
+        # logger.commandline(f'Reward value: {reward}\n'
+        #                    f'\tCost: {cost_penalty}\n'
+        #                    f'\tsoc_term: {soc_term}\n'
+        #                    f'\tsatisfy: {satisfaction}\n'
+        #                    f'\tperiod energy: {self.period_charging_energy}')
         # use the plotter to plot the reward values
         return reward
-
-

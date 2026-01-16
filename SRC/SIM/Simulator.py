@@ -5,16 +5,18 @@ import pandas as pd
 from SRC.SIM.ESS.ess_handler import ESSHandler
 from SRC.SIM.EV.ev_handler import EVHandler
 from SRC.SIM.Thermal.thermal_handler import ThermalHandler
-from SRC.SIM.Weather.epwHandler import EPWWeatherHandler
+# from SRC.SIM.Weather.epwHandler import EPWWeatherHandler
+# from SRC.SIM.Weather.epwhandler_V_1_0_2 import EPWWeatherHandler
+from SRC.SIM.Weather.epwhandler_V_1_0_3 import EPWWeatherHandler
 from SRC.SIM.Tariff.tariffHandler import tariffHandler
 from SRC.SIM.DataGenerator.data_generators import PatternGenerationHandler
 from SRC.support.lib_config import CustomLogger
 
 from SRC.SIM.EquipmentClass import InverterModel, EVModel, MeterModel, HVACModel
+
 np.set_printoptions(suppress=True, precision=2)
 
 logger = CustomLogger(command=True)
-
 
 # Information collection
 NET_POWER = ['Total Electric Power (kW)', 'Total Reactive Power (kVAR)']
@@ -22,12 +24,14 @@ INVERTER = ['PV Electric Power (kW)', 'Battery Electric Power (kW)', 'Battery SO
 EV = ['EV Parked', 'EV SOC (-)', 'EV Electric Power (kW)']
 HVAC = ["Temperature - Indoor (C)", "HVAC Heating Electric Power (kW)", "Temperature - Outdoor (C)"]
 
+
 class SimulationEnded(Exception):
     pass
 
+
 class dwelling:
     def __init__(self, name: str, start_time: dt.datetime, duration: dt.timedelta, resolution: dt.timedelta,
-                 demand_config:dict = None, weather_file:str=None,pv_config: dict = None,
+                 demand_config: dict = None, weather_file: str = None, pv_config: dict = None,
                  battery_config: dict = None, ev_config: dict = None, thermal_config=None, PV=0,
                  tariff: tariffHandler = None, seed: int = 42):
         self.name = name
@@ -106,6 +110,8 @@ class dwelling:
                 seed=self.seed,
                 column_name="Demand Electric Power (kW)",
             )
+            # plot value
+            # demandHandler.visualize_csv_pattern()
 
         else:
             logger.commandline("No demand model detected self.demand = None, setting value to 0")
@@ -118,31 +124,37 @@ class dwelling:
             )
         self.simulation_df = self.simulation_df.join(demand_df)
 
-        ### For weather and PV
+        # For weather and PV
         if self.weather_file:
             logger.commandline('weather conf detected setting up weather infor (Outdoor Temp C)')
             weatherHandler = EPWWeatherHandler(self.weather_file)
-            weather_df = weatherHandler.get_temperature(start_date=self.start_time,
+            weather_df = weatherHandler.get_simulation_data(start_date=self.start_time,
                                                         resolution=self.resolution,
                                                         duration=self.duration)
             self.simulation_df = self.simulation_df.join(weather_df)
             if self.pv_config:
-                print(self.pv_config)
+                logger.commandline(self.pv_config)
                 required_keys = {"capacity W", "efficiency", "area per W", "tilt", "azimuth"}
                 missing = required_keys - self.pv_config.keys()
                 if missing:
                     logger.raise_error(f"Missing required keys in self.demand: {missing}")
                     return
                 logger.commandline('PV conf detected setting up PV generation using weather file')
-                pv_rating = self.pv_config.get('capacity W',0)/1000
-                pv_efficiency = self.pv_config.get('efficiency',1)
+                pv_rating = self.pv_config.get('capacity W', 0) / 1000
+                pv_efficiency = self.pv_config.get('efficiency', 1)
+                ghi = self.simulation_df["Global Horizontal Radiation"].fillna(0)
+                pv_df = (ghi / 1000.0) * pv_efficiency * pv_rating
+                pv_df = pv_df.clip(lower=0)
 
-                pv_df = weatherHandler.get_pv_generation(start_date=self.start_time,
-                                                         duration=self.duration,
-                                                         resolution=self.resolution,
-                                                         pv_capacity_kw=pv_rating,
-                                                         pv_efficiency=pv_efficiency,
-                                                         )
+                pv_df.name = "PV Electric Power (kW)"
+
+                # print(pv_df.head())
+                # pv_df = weatherHandler.get_pv_generation(start_date=self.start_time,
+                #                                          duration=self.duration,
+                #                                          resolution=self.resolution,
+                #                                          pv_capacity_kw=pv_rating,
+                #                                          pv_efficiency=pv_efficiency,
+                #                                          )
                 self.simulation_df = self.simulation_df.join(pv_df)
         else:
             logger.commandline('No weather file detected: self.weather = None')
@@ -150,7 +162,7 @@ class dwelling:
         ### For EV
         if self.ev_config or self.EV:  # Multi EV
             logger.commandline('==== Initializing EV ====')
-            EV_KEYS = ["EV Electric Power (kW)", "EV Set Power (kW)","EV SOC (-)", "EV Parked"]
+            EV_KEYS = ["EV Electric Power (kW)", "EV Set Power (kW)", "EV SOC (-)", "EV Parked"]
             ev_df = pd.DataFrame(
                 0.0,
                 index=self.simulation_df.index,
@@ -159,16 +171,20 @@ class dwelling:
             # if ev config is provided then setup self.EV handler
             if self.ev_config:
                 # checking config
-                required_keys = {"capacity Wh", "initial soc", "charging power W", "discharging power W",
-                                 "charging eff", "discharging eff"}
-                missing = required_keys - self.battery_config.keys()
+                # required_keys = {"capacity Wh", "initial soc", "charging power W", "discharging power W",
+                #                  "charging eff", "discharging eff"}
+                required_keys = {"capacity Wh", "charging power W", "discharging power W",
+                                 "charging eff", "discharging eff", "v2g_enabled", "profile_file"}
+                missing = required_keys - self.ev_config.keys()
                 if missing:
                     logger.raise_error(f"Missing required keys in self.demand: {missing}")
                     return
                 # setup battery
                 total_capacity_Wh = self.ev_config.get('capacity Wh')
                 charging_power_W = self.ev_config.get('charging power W')
-                discharging_power_W = 0
+                discharging_power_W = self.ev_config.get('discharging power W')
+                in_eff = self.ev_config.get('charging eff')
+                out_eff = self.ev_config.get('discharging eff')
                 v2g_enable = self.ev_config.get
                 if v2g_enable:
                     discharging_power_W = self.ev_config.get('discharge power W', 0)
@@ -187,6 +203,8 @@ class dwelling:
                     discharging_power_W=discharging_power_W,  # V2G capable
                     v2g_enabled=False,
                     seed=self.seed,
+                    in_eff=in_eff,
+                    out_eff= out_eff
                 )
             elif isinstance(self.EV, EVHandler):
                 logger.commandline("EV is a EVHandler")
@@ -209,7 +227,8 @@ class dwelling:
             self.simulation_df = self.simulation_df.join(ess_df)
             if self.battery_config:
                 # setting up battery
-                required_keys = {"capacity Wh", "initial soc","charging power W","discharging power W", "charging eff","discharging eff"}
+                required_keys = {"capacity Wh", "initial soc", "charging power W", "discharging power W",
+                                 "charging eff", "discharging eff"}
                 missing = required_keys - self.battery_config.keys()
                 if missing:
                     logger.raise_error(f"Missing required keys in self.demand: {missing}")
@@ -269,14 +288,12 @@ class dwelling:
             logger.commandline('No tariff is defined: Ignoring Cost and tariff in the simulation')
 
     EXPECTED_KEYS = {
-        "timestamp",
+        "Time",
         "Demand Electric Power (kW)",
         "PV Electric Power (kW)",
-        "Temperature - Outdoor (C)",
-        "EV Parked",
     }
 
-    def upload_data(self, file):
+    def upload_data(self, file):  # Upload for Demand and Generation only
         """
         Upload CSV data and update self.simulation_df.
 
@@ -391,8 +408,8 @@ class dwelling:
 
         row = self.simulation_df.loc[t]
 
-        demand_kw = row.get("Demand Electric Power (kW)",0)
-        pv_kw = row.get("PV Electric Power (kW)",0)
+        demand_kw = row.get("Demand Electric Power (kW)", 0)
+        pv_kw = row.get("PV Electric Power (kW)", 0)
 
         # ---------------- EV ----------------
         ev_kw = 0.0
@@ -414,9 +431,9 @@ class dwelling:
         # ---------------- Thermal ----------------
         thermal_kw = 0
         if self.Thermal:
-            HVAC_control = control.get('HVAC Heating',{})
+            HVAC_control = control.get('HVAC Heating', {})
             power_p_set = HVAC_control.get('P Setpoint', 0)
-            thermal_kw = abs(power_p_set/1000)
+            thermal_kw = abs(power_p_set / 1000)
             outdoor_temp = row.get("Temperature - Outdoor (C)", None)  # only used for the Thermal System
             indoor_temp = self.Thermal.update(
                 power_W=control.get("thermal_kw", power_p_set),
@@ -458,7 +475,7 @@ class dwelling:
 
         return row_return
 
-    def step(self, control_signal:dict)-> tuple[InverterModel, MeterModel, EVModel, HVACModel, dict]:
+    def step(self, control_signal: dict) -> tuple[InverterModel, MeterModel, EVModel, HVACModel, dict]:
 
         if control_signal is None:
             control_signal = {}
@@ -481,11 +498,11 @@ class dwelling:
         self.MeterModel.reactive_power = float(house_status.get(NET_POWER[1], 0))
         self.MeterModel.tariff = float(tariff)
         self.MeterModel.feed_tariff = float(feed_tariff)
-        self.MeterModel.tariff_24hrs,self.MeterModel.feed_tariff_24hrs = (self.tariff.get_tariff_range_df
-                                                                          (now_time=time_value, period=24,
-                                                                           resolution=dt.timedelta(minutes=60)))
+        self.MeterModel.tariff_24hrs, self.MeterModel.feed_tariff_24hrs = (self.tariff.get_tariff_range_df
+                                                                           (now_time=time_value, period=24,
+                                                                            resolution=dt.timedelta(minutes=60)))
         # print(self.MeterModel.model_dump())
-        self.MeterModel.add_period(self.resolution.total_seconds()/60)
+        self.MeterModel.add_period(self.resolution.total_seconds() / 60)
 
         self.EVModel.time = time_value
         self.EVModel.ev_status = bool(house_status.get(EV[0], 0))
@@ -506,4 +523,3 @@ class dwelling:
                 self.MeterModel,
                 self.EVModel,
                 self.HVACModel, house_status)
-

@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from SRC.support.probability_lib import ProbabilityDistributions  # your file :contentReference[oaicite:0]{index=0}
 from SRC.support.lib_config import CustomLogger
 
-logger = CustomLogger(command=True)
+logger = CustomLogger(command=False)
+
 
 class PatternGenerationHandler:
     """
@@ -56,34 +57,86 @@ class PatternGenerationHandler:
             )
             return 0.0
         return value
+
     # ------------------------------------------------------------------
     def generate_24h(
             self,
             resolution: timedelta,
             aggregate: str = "mean",
-            seed: int | None = None
+            seed: int | None = None,
+            intra_noise_std: float = 0.1,  # <-- your white noise std
+            intra_noise_mean: float = 0.0,  # <-- mean 0
     ) -> np.ndarray:
         """
-        resolution : output timestep
-        aggregate  : 'mean' or 'sum' (used when downsampling)
+        Generate 24h samples.
+
+        If resolution is finer than the CSV base resolution:
+          - draw ONE base sample per CSV interval
+          - for each sub-step inside that interval, add white noise N(0, intra_noise_std)
+
+        If resolution is equal/coarser:
+          - keep existing behavior: one sample per target step after (optional) aggregation
         """
+        rng = np.random.default_rng(seed)
 
-        if seed is not None:
-            np.random.seed(seed)
-
+        # Determine CSV base resolution
+        if len(self.df.index) < 2:
+            raise ValueError("CSV must contain at least 2 rows to infer base resolution.")
         base_resolution = self.df.index[1] - self.df.index[0]
+
+        # Target 24h timeline
         target_index = pd.timedelta_range(
             start=timedelta(0),
             end=timedelta(hours=24) - resolution,
             freq=resolution
         )
 
-        # ---- Upsampling → ffill
+        # -----------------------------
+        # Case A: finer than CSV → base draw + white noise
+        # -----------------------------
         if resolution < base_resolution:
-            params = self.df.reindex(target_index, method="ffill")
+            # Build a base timeline at CSV resolution for a full 24h
+            base_index = pd.timedelta_range(
+                start=timedelta(0),
+                end=timedelta(hours=24) - base_resolution,
+                freq=base_resolution
+            )
 
-        # ---- Downsampling → aggregate
-        elif resolution > base_resolution:
+            # Align CSV params to base timeline (ffill covers missing)
+            base_params = self.df.reindex(base_index, method="ffill")
+
+            # Draw ONE sample per base interval
+            base_values = []
+            for _, row in base_params.iterrows():
+                # Use your distribution sampler, but keep RNG reproducible
+                # by temporarily drawing u from rng and using inv_transform directly.
+                # Easiest drop-in: call your existing method, but it uses np.random.rand().
+                # To keep reproducible with rng, we emulate it here:
+                u = rng.random()
+                base_val = self.dist.get_inv_transform(self.model_name, u, **row.to_dict())
+                base_val = self._enforce_non_negative(base_val)
+                base_values.append(base_val)
+            base_values = np.array(base_values)
+
+            # Map each fine timestep to its base interval index
+            samples = []
+            steps_per_base = int(base_resolution / resolution)
+            if steps_per_base * resolution != base_resolution:
+                raise ValueError(
+                    "resolution must divide the CSV base resolution exactly for intra-interval noise mode.")
+
+            for i, t in enumerate(target_index):
+                base_i = int(t / base_resolution)  # which base interval
+                val = base_values[base_i] + rng.normal(loc=intra_noise_mean, scale=intra_noise_std)
+                val = self._enforce_non_negative(val)
+                samples.append(round(val, 3))
+
+            return np.array(samples)
+
+        # -----------------------------
+        # Case B: equal/coarser than CSV → old behavior (one draw per target step)
+        # -----------------------------
+        if resolution > base_resolution:
             rule = pd.Timedelta(resolution)
             if aggregate == "mean":
                 params = self.df.resample(rule).mean()
@@ -91,21 +144,17 @@ class PatternGenerationHandler:
                 params = self.df.resample(rule).sum()
             else:
                 raise ValueError("aggregate must be 'mean' or 'sum'")
-
             params = params.reindex(target_index, method="ffill")
-
         else:
             params = self.df.reindex(target_index, method="ffill")
 
-        # ---- Monte Carlo sampling
         samples = []
         for _, row in params.iterrows():
-            val = self.dist.monte_carlo_single_sample(
-                self.model_name,
-                **row.to_dict()
-            )
+            u = rng.random()
+            val = self.dist.get_inv_transform(self.model_name, u, **row.to_dict())
             val = self._enforce_non_negative(val)
             samples.append(round(val, 3))
+
         return np.array(samples)
 
     def get_simulation_data(

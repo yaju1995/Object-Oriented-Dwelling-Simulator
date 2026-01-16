@@ -18,17 +18,7 @@ print("PyTorch built with NumPy:", torch.__config__.show())
 # from ..support.lib_config import CustomLogger
 
 # Optional logger
-try:
-    from ..support.lib_config import CustomLogger
-
-    logger = CustomLogger(False)
-
-
-    def log(msg: str):
-        logger.commandline(msg)
-except Exception:
-    def log(msg: str):
-        pass
+from SRC.support.lib_config import CustomLogger
 
 
 # ---------------------------
@@ -49,7 +39,7 @@ class ActorNetwork(nn.Module):
                        activation=activation[0],
                        out_act=activation[1])  # Final activation controls output range
 
-    def forward(self, obs: torch.Tensor):
+    def forward(self, obs: torch.Tensor)-> torch.Tensor:
         return self.net(obs)
 
 
@@ -60,7 +50,7 @@ class CriticNetwork(nn.Module):
                        activation=activation[0],
                        out_act=nn.Identity)  # Final layer is a value → no activation
 
-    def forward(self, obs: torch.Tensor, act: torch.Tensor):
+    def forward(self, obs: torch.Tensor, act: torch.Tensor)-> torch.Tensor:
         x = torch.cat([obs, act], dim=1)
         return self.net(x)
 
@@ -70,15 +60,28 @@ class CriticNetwork(nn.Module):
 # ---------------------------
 class ReplayBuffer:
     def __init__(self, capacity: int = 100_000):
-        self.buf: Deque[Tuple[np.ndarray, float, float, np.ndarray, float]] = deque(maxlen=capacity)
+        # store action as np.ndarray, not float
+        self.buf: Deque[Tuple[np.ndarray, np.ndarray, float, np.ndarray, float]] = deque(maxlen=capacity)
 
-    def push(self, s, a: float, r: float, s2, done: bool):
-        self.buf.append((s, a, r, s2, float(done)))
+    def push(self, s, a, r: float, s2, done: bool):
+        self.buf.append((
+            np.asarray(s, dtype=np.float32),
+            np.asarray(a, dtype=np.float32),
+            float(r),
+            np.asarray(s2, dtype=np.float32),
+            float(done),
+        ))
 
-    def sample(self, batch_size: int):
+    def sample(self, batch_size):
         batch = random.sample(self.buf, batch_size)
-        s, a, r, s2, d = map(np.array, zip(*batch))
-        return s, a, r, s2, d
+        s, a, r, s2, d = zip(*batch)
+        return (
+            np.asarray(s, dtype=np.float32),
+            np.asarray(a, dtype=np.float32),  # should become (B, act_dim)
+            np.asarray(r, dtype=np.float32),
+            np.asarray(s2, dtype=np.float32),
+            np.asarray(d, dtype=np.float32),
+        )
 
     def __len__(self):
         return len(self.buf)
@@ -103,7 +106,7 @@ class DDPGConfig:
 
 # --- DPG Agent ---
 class DDPGAgent:
-    def __init__(self, obs_dim, act_dim, max_action, cfg: DDPGConfig):
+    def __init__(self, obs_dim, act_dim,  cfg: DDPGConfig):
         random.seed(cfg.seed)
         np.random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
@@ -124,18 +127,19 @@ class DDPGAgent:
         self.gamma = cfg.gamma
         self.seed = cfg.seed
 
-        self.max_action = max_action
         self.device = cfg.device
         self.tau = cfg.tau  # soft update factor
 
     def choose_action(self, state, noise_std=0.1):
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        raw_action = self.actor(state_tensor).detach().numpy()[0]
-        scaled_action = raw_action * self.max_action
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
 
-        # Add noise for exploration
-        noise = np.random.normal(0, noise_std, size=scaled_action.shape)
-        return np.clip(scaled_action + noise, -self.max_action, self.max_action)
+        with torch.no_grad():
+            a_norm = self.actor(state_tensor).cpu().numpy()[0]
+
+        noise = np.random.normal(0, noise_std, size=a_norm.shape)
+        a_norm = np.clip(a_norm + noise, -1.0, 1.0)
+
+        return a_norm  # NORMALIZED action
 
     def store_transition(self, state, action: float, reward: float, next_state, done: bool):
         self.buffer.push(state, action, reward, next_state, done)
@@ -156,23 +160,22 @@ class DDPGAgent:
         # ----- Critic update -----
         with torch.no_grad():
             # target_actions need to be scaled to match env bounds
-            target_raw_actions = self.actor_target(next_states)
-            target_actions = target_raw_actions * self.max_action
-
-            target_q = rewards + self.gamma * (1 - dones) * self.critic_target(next_states, target_actions)
+            next_actions = self.actor_target(next_states)  # normalized [-1,1]
+            target_q = self.critic_target(next_states, next_actions)
+            y = rewards + self.gamma * (1.0 - dones) * target_q
+            # target q will be estimated with past reward value,
+            # for n step do some then end the reward only do sume for n step donot excess taht
 
         current_q = self.critic(states, actions)
-        critic_loss = nn.MSELoss()(current_q, target_q)
+        critic_loss = nn.MSELoss()(current_q, y)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
         # ----- Actor update -----
-        raw_action = self.actor(states)  # ∈ [-1, 1]
-
-        scaled_action = raw_action * self.max_action  # scale to env
-        actor_loss = -self.critic(states, scaled_action).mean()
+        actor_actions = self.actor(states)  # ∈ [-1, 1]
+        actor_loss = -self.critic(states, actor_actions).mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()

@@ -8,27 +8,39 @@ from SRC.SIM.ControlSignalHandler import ControlSignal
 from SRC.Controller.Database.PandasDatabase import DataStore
 from .Constants import COLUMNS_KEYS
 
-from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent, DDPGConfig
+# from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent, DDPGConfig
+from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent, DDPGConfig
 from SRC.Controller.EV_controller.evControlLib import ev_controller
 from SRC.support.lib_config import CustomLogger
 
 logger = CustomLogger(command=True)
 
 # EV controller design
-EV_Config = DDPGConfig
 EV_DDPG_config = DDPGConfig()
 EV_DDPG_config.gamma = 0.9
 EV_DDPG_config.actor_lr = 1e-3
 EV_DDPG_config.critic_lr = 1e-3
+EV_DDPG_config.hidden = (128, 128)
 EV_DDPG_config.activation = (nn.ReLU, nn.Sigmoid)
-RL_AGENT = DDPGAgent(obs_dim=5, act_dim=1, max_action=1, cfg=EV_DDPG_config)
+# EV_RL_AGENT = DDPGAgent(obs_dim=8, act_dim=1,  cfg=EV_DDPG_config,n_step=1)
+EV_RL_AGENT = DDPGAgent(obs_dim=8, act_dim=1,  cfg=EV_DDPG_config,n_step=1)
 
+# ESS controller design
+ESS_DDPG_Config = DDPGConfig()
+ESS_DDPG_Config.hidden = (64, 64)
+ESS_DDPG_Config.activation = (nn.ReLU, nn.Sigmoid)
+ESS_RL_AGENT = DDPGAgent(obs_dim=5, act_dim=1,  cfg=ESS_DDPG_Config)
+
+# Currently direct definition for early traning and testing
 
 class HEMSController:
     def __init__(self, name: str,
                  data_resolution: timedelta,
                  meter_tariff: tariffHandler,
-                 ev_tariff: tariffHandler = None):
+                 ev_tariff: tariffHandler = None,
+                 ess_update_period:timedelta = timedelta(minutes=30),
+                 ev_update_period:timedelta = timedelta(minutes=15),
+                 havc_update_period:timedelta = timedelta(minutes=5)):
         """
 
         :param name: name for the controller
@@ -38,21 +50,22 @@ class HEMSController:
         """
         self.name = name
         self.resolution: timedelta = data_resolution
-        self.ev_update_period = timedelta(minutes=30)
-        self.ess_update_period = timedelta(minutes=15)
-        self.hvac_update_period = timedelta(minutes=5)
+        self.ev_update_period = ev_update_period
+        self.ess_update_period = ess_update_period
+        self.hvac_update_period = havc_update_period
         self.hems_database = DataStore(resolution=data_resolution)
         self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
         self.hems_logs.index.name = "timestamp"
         self.control_signals = ControlSignal()
 
-        self.ev_controller = ev_controller(RL_AGENT, resolution=self.resolution,
+        self.ev_controller = ev_controller(EV_RL_AGENT, resolution=self.resolution,
                                            update_period=self.ev_update_period,
                                            global_database=self.hems_database)
-        if ev_tariff is None:
-            self.ev_controller.tariff_handler = meter_tariff
-        else:
-            self.ev_controller.tariff_handler = meter_tariff
+        if self.ev_controller is not None:
+            if ev_tariff is None:
+                self.ev_controller.tariff_handler = meter_tariff
+            else:
+                self.ev_controller.tariff_handler = ev_tariff
 
         self.ess_controller = None
         self.hvac_controller = None
@@ -66,19 +79,10 @@ class HEMSController:
         self.ESS_charge = False
         self.HVAC_ON = False
 
-    def update_using_status(self, house_df: pd.DataFrame, tariff_info):
-
-        pass
-
     def update(self, ev_info: EVModel, inverter_info: InverterModel, hvac_info: HVACModel, meter_info: MeterModel):
-        # if we collect enough data then forecast
-        # if forecasted then get control action
-        # if action received then generation action dict
-        # return action
-        # based on the information received HEMS create df to store the information,
-        # Meter information
+
         now_time = meter_info.time
-        next_time = now_time + self.resolution
+        # logger.commandline(f'Now time:{now_time}')
         # Consumption power
         consumption = round(meter_info.active_power - inverter_info.battery_power + inverter_info.pv_power, 3)
         hours = self.resolution.total_seconds() / 3600
@@ -95,9 +99,11 @@ class HEMSController:
             'Generation (kWh)': inverter_info.pv_power * hours,
             'Total Electric Power (kW)': meter_info.active_power,
             'Total Electric Power (kWh)': meter_info.active_power * hours,
+
             'tariff': meter_info.tariff,
             'feed tariff': meter_info.feed_tariff,
             'Instant Cost': instant_cost,
+
             'Battery SOC (-)': inverter_info.battery_soc,
             'Battery Set Power (kW)': self.control_signals.Battery_P_Setpoint or 0,
 
@@ -106,6 +112,7 @@ class HEMSController:
             'EV Set Point (kW)': self.control_signals.EV_Max_Power or 0,
             'EV Consumption (kW)': ev_info.ev_power,
             'EV Consumption (kWh)': ev_info.ev_power * hours,
+
             'Temperature - Indoor (C)': hvac_info.ti,
             'HVAC Consumption (kW)': hvac_info.hvac_power,
             'HVAC Consumption (kWh)': hvac_info.hvac_power * hours,
@@ -113,44 +120,29 @@ class HEMSController:
         next_24hr_tariff = meter_info.tariff_24hrs
         next_24hr_feed_tariff = meter_info.feed_tariff_24hrs
 
-        # EV 1min updates
-        # self.ev_controller.update_status(ev_info=ev_info)
-
-        # self.hems_logs.loc[now_time] = row
-        #
-        #
-        # # Demand = Uncontrollable demand + EV + HVAC
-        #
-        # period_minutes = int(self.ev_update_period.total_seconds() // 60)
-        # do_ev_update = (next_time.minute % (self.ev_update_period.total_seconds() // 60) == 0)
-        #
-        # logger.commandline(f'Getting df for ESS: {now_time}')
-        # df = self.get_past_period_df(now_time, 3)
-        # print(df)
-        # # state
-        # # get consumption last n hours in 5 min resolution
-        # if df is not None:
-        #     get_energy_state = self.get_resampled(df, resolution=timedelta(minutes=60),
-        #                                           headers=['Consumption (kWh)',
-        #                                                    'Generation (kWh)',
-        #                                                    'Total Electric Power (kWh)',
-        #                                                    'EV Consumption (kWh)',
-        #                                                    'HVAC Consumption (kWh)'],
-        #                                           agg="sum")
-        #     instant_keys = ['Battery SOC (-)', 'EV Parked', 'EV SOC (-)', 'Temperature - Indoor (C)']
-        #     get_instant_state = self.hems_logs.iloc[-1][instant_keys]
-        #
-        #     print(get_energy_state)
-        #     print(get_instant_state)
-        #     # pass
-        #     # this df with in the code
-        # generation_value = round(inverter_info.pv_power, 3)
-        # ################Database test
+        # Database test
         self.hems_database.append(now_time, row)  # First update row then collect information
+
+        # EV control
         self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
+        # if ev_info.ev_status:
+        #     self.control_signals.EV_Max_Power = 7
+        # else:
+        #     self.control_signals.EV_Max_Power = 0
+
         if self.control_signals.EV_Max_Power is not None:
             self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
+        # HVAC Control
+        if hvac_info.ti <= 20:
+            self.HVAC_ON = True
+        elif hvac_info.ti >= 25:
+            self.HVAC_ON = False
 
+        if self.HVAC_ON:
+            self.control_signals.HVAC_Heating_Power = -8000
+        else:
+            self.control_signals.HVAC_Heating_Power = None
+        # Battery control
         if inverter_info.battery_soc <= 0.0:
             self.ESS_charge = True
         elif inverter_info.battery_soc >= 0.8:
@@ -161,15 +153,7 @@ class HEMSController:
         else:
             self.control_signals.Battery_P_Setpoint = -consumption * 1000
 
-        if hvac_info.ti <= 20:
-            self.HVAC_ON = True
-        elif hvac_info.ti >= 25:
-            self.HVAC_ON = False
 
-        if self.HVAC_ON:
-            self.control_signals.HVAC_Heating_Power = -8000
-        else:
-            self.control_signals.HVAC_Heating_Power = None
 
         # if do_ev_update:
         #     df15 = self.hems_database.past_period_resampled(
@@ -186,12 +170,6 @@ class HEMSController:
         control_signal = self.control_signals.generate_control_signal()
         # logger.commandline(control_signal)
         return control_signal
-
-    def _getESS_state(self, resolution: timedelta, now_time):
-        # get instant SOC
-        # get past n period energy data
-        # get tariff n next or past
-        pass
 
     def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resilution as well
         """

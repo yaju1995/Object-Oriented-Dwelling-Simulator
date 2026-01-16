@@ -11,7 +11,9 @@ battery_config = {
 ev_config = {
     "capacity Wh": 60_000,  # 60 kWh
     "charging power W": 7_400,  # 7.4 kW charger
-    "discharging power W": 7_400,  # V2G capable
+    "discharging power W": 0,  # V2G capable
+    "charging eff": 1,
+    "discharging eff": 1,
     "v2g_enabled": False,
     "profile_file":"./SRC/SIM/Defaults/EV/pdf_Veh1_Level0.csv"
 }
@@ -32,6 +34,7 @@ demand_config = {
 
 # Weather file is the just Path ot name of the CSV with .epw
 weather_file = './SRC/SIM/Defaults/Weather/IRL_Dublin.039690_IWEC.epw'
+# weather_file = './SRC/SIM/Defaults/Weather/USA_GA_Atlanta-Hartsfield-Jackson.Intl.AP.722190_TMY3.epw'
 
 
 pv_config = {
