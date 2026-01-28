@@ -5,7 +5,8 @@ import numpy as np
 from datetime import timedelta, datetime
 
 # from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent
-from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent
+# from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent
+from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent
 from SRC.support.lib_config import CustomLogger
 from SRC.SIM.EquipmentClass import EVModel, pv
 from SRC.Controller.Database.PandasDatabase import DataStore
@@ -51,18 +52,23 @@ def add_step(step_info):
 
 ##############################
 logger = CustomLogger(command=False, color='green')
-
-
 ##############################
+
+def safe_div(a, b):
+    return a / b if b else 0.0
+
 
 class ev_controller:
     def __init__(self, rl_agent: DDPGAgent, resolution: timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=30),
-                 global_database: DataStore = None):
+                 global_database: DataStore = None, mode='Train', max_charging_power=7, look_ahead = 1):
 
         self.ev_status = 0
         self.global_database = global_database
-        self.max_charging_power = 7
+        self.mode = mode
+        self.max_charging_power = max_charging_power
+        self.look_ahead = look_ahead
+        ########################################################
         self.connection_status = False
         self.connect_time = None
         self.leave_time = None
@@ -113,14 +119,13 @@ class ev_controller:
         self.initial_soc_list = []
         self.final_soc_list = []
         self.duration_list = []
-        self.multiPlotter = LivePlotter4(['Cost per kWh','change SoC','Final SOC','None' ],
-                                         xlabels=['Episode','Episode','Episode','None'],
-                                         ylabels=['$/kWh','SoC/min','SOC%', 'None'])
+        self.multiPlotter = LivePlotter4(['Cost per kWh', 'change SoC', 'Final SOC', 'Overall $/kwh'],
+                                         xlabels=['Episode', 'Episode', 'Episode', 'Episode'],
+                                         ylabels=['$/kWh', 'SoC/min', 'SOC%', '$/kwh'])
         # self.plotter1 = LivePlotter('Cost per kWh', 'Episode', '$/kWh')
         # self.plotter2 = LivePlotter('change SoC', 'Episode', 'SoC/min')
         # self.plotter3 = LivePlotter('Final SOC', 'Episode', 'SOC')
         self.enable_plotter = True
-
 
     def update_status(self, ev_info: EVModel):
 
@@ -189,8 +194,9 @@ class ev_controller:
                 self.satisfied_energy += self.final_soc
                 self.duration_list.append(session_minutes)
                 if self.enable_plotter:
-                    self.multiPlotter.update([self.ev_sessions_charging_cost / self.ev_sessions_charging_energy,
-                                              soc_change_rate,self.final_soc*100,0])
+                    self.multiPlotter.update([ safe_div(self.ev_sessions_charging_cost, self.ev_sessions_charging_energy),
+                                              soc_change_rate, self.final_soc * 100,
+                                             self.total_ev_charging_cost/self.total_ev_charging_energy])
                     # self.plotter1.update(self.ev_sessions_charging_cost / self.ev_sessions_charging_energy)
                     # self.plotter2.update(soc_change_rate)
                     # self.plotter3.update(self.final_soc*100)
@@ -206,6 +212,8 @@ class ev_controller:
                     f"Time to full:    {full_charge_minutes} minutes\n"
                     f"Data points:     {len(self.ev_df)}\n"
                     f"SOC Rate change: {soc_change_rate}\n"
+                    f"Overall cost : {self.total_ev_charging_cost}\n"
+                    f"Overall energy : {self.total_ev_charging_energy}\n"
                     "=======================================\n"
                 )
 
@@ -248,7 +256,6 @@ class ev_controller:
         # print(tariff_normal, tariff, self.tariff_handler.max_tariff, self.tariff_handler.min_tariff)
         self.nom_period_charging_cost += (round(period_energy_normal * tariff_normal,
                                                 6)) / sim_cont_ration
-
 
         # ===============================================================
         #   CONTROL UPDATE CHECK
@@ -305,13 +312,14 @@ class ev_controller:
 
             # Save transition (terminal or non-terminal)
             # pass to deque for delay reward update, update reward then add to agent store
-            self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, False)
+            self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, done)
 
             logger.commandline(control_time, self.state, self.action, reward, self.next_state, done)
 
             # Train agent
             # if update ready then only at the end of the session
-            self.rl_agent.train()
+            if self.mode == 'Train':
+                self.rl_agent.train()
 
         # Check is the charge is disconnected : if so the set action = 0
         if done:
@@ -335,8 +343,11 @@ class ev_controller:
         # ==========================================================
         # Choose next action [update self.action]
         # ==========================================================
-
-        self.action = self.rl_agent.choose_action(self.state, noise_std=0.1)
+        if self.mode == 'Train':
+            noise = 0.1
+        else:
+            noise = 0.0
+        self.action = self.rl_agent.choose_action(self.state, noise_std=noise)
         if self.full_charge_status:
             self.action = np.array([0])
         # logger.commandline(f'Getting action {self.action}')
@@ -373,7 +384,7 @@ class ev_controller:
         soc = self.instant_soc
 
         # next period oven period tariff
-        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_df(control_time, period=4,
+        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_df(control_time, period=self.look_ahead,
                                                                                     resolution=self.update_period)
         tariff_states = np.array(tariff_states)
         tariff_max = self.tariff_handler.max_tariff
@@ -432,3 +443,10 @@ class ev_controller:
         #                    f'\tperiod energy: {self.period_charging_energy}')
         # use the plotter to plot the reward values
         return reward
+
+    def save_model(self, path):
+        # Ensure the directory exists
+        logger.commandline(self.rl_agent.save(path))
+
+    def load_model(self,path):
+        logger.commandline(self.rl_agent.load(path))

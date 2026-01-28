@@ -145,7 +145,7 @@ for t in range(steps - 1):
     # print(status.get(INVERTER[1], 0))
     # print(status.get(INVERTER[2], 0))
 #
-House.simulation_df.to_csv('./Results/simulation_test.csv')
+House.simulation_df.to_csv('./Results/simulation_test_DDPG_03_cost_test.csv')
 # House.upload_data('./SRC/SIM/Example/update_sample.csv')
 
 # House.upload_data('Active_power_kw', file)

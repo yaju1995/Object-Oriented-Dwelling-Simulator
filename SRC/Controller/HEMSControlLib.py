@@ -7,11 +7,19 @@ from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
 from SRC.Controller.Database.PandasDatabase import DataStore
 from .Constants import COLUMNS_KEYS
+from SRC.SIM.Simulator_Config.config_list import (pv_config,
+                                                  ev_config,
+                                                  thermal_config,
+                                                  weather_file,
+                                                  demand_config,
+                                                  battery_config)
 
 # from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent, DDPGConfig
-from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent, DDPGConfig
+# from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent, DDPGConfig
+from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent, DDPGConfig
 from SRC.Controller.EV_controller.evControlLib import ev_controller
 from SRC.support.lib_config import CustomLogger
+import os
 
 logger = CustomLogger(command=True)
 
@@ -22,14 +30,22 @@ EV_DDPG_config.actor_lr = 1e-3
 EV_DDPG_config.critic_lr = 1e-3
 EV_DDPG_config.hidden = (128, 128)
 EV_DDPG_config.activation = (nn.ReLU, nn.Sigmoid)
-# EV_RL_AGENT = DDPGAgent(obs_dim=8, act_dim=1,  cfg=EV_DDPG_config,n_step=1)
-EV_RL_AGENT = DDPGAgent(obs_dim=8, act_dim=1,  cfg=EV_DDPG_config,n_step=1)
+EV_LOOK_AHEAD = 1  # If you update this try to match the input state with this
+EV_INPUT_DIM = 5  # try to match the observed state with delay steps
+EV_OUT_DIM = 1
+# EV_RL_AGENT = DDPGAgent(obs_dim=EV_INPUT_DIM, act_dim=EV_OUT_DIM,  cfg=EV_DDPG_config,n_step=EV_STEP)
+EV_RL_AGENT = DDPGAgent(obs_dim=EV_INPUT_DIM, act_dim=EV_OUT_DIM, cfg=EV_DDPG_config, n_step=EV_LOOK_AHEAD,
+                        return_mode='nstep')
+EV_MODEL_DIR = f'Models/EV/n_step_{EV_LOOK_AHEAD}/'
+EV_MODEL_NAME = f'states_{EV_INPUT_DIM}_config1_delay_{EV_LOOK_AHEAD}_cost_5.pth'
+
+
 
 # ESS controller design
-ESS_DDPG_Config = DDPGConfig()
-ESS_DDPG_Config.hidden = (64, 64)
-ESS_DDPG_Config.activation = (nn.ReLU, nn.Sigmoid)
-ESS_RL_AGENT = DDPGAgent(obs_dim=5, act_dim=1,  cfg=ESS_DDPG_Config)
+# ESS_DDPG_Config = DDPGConfig()
+# ESS_DDPG_Config.hidden = (64, 64)
+# ESS_DDPG_Config.activation = (nn.ReLU, nn.Sigmoid)
+# ESS_RL_AGENT = DDPGAgent(obs_dim=5, act_dim=1,  cfg=ESS_DDPG_Config)
 
 # Currently direct definition for early traning and testing
 
@@ -38,9 +54,11 @@ class HEMSController:
                  data_resolution: timedelta,
                  meter_tariff: tariffHandler,
                  ev_tariff: tariffHandler = None,
-                 ess_update_period:timedelta = timedelta(minutes=30),
-                 ev_update_period:timedelta = timedelta(minutes=15),
-                 havc_update_period:timedelta = timedelta(minutes=5)):
+                 ess_update_period: timedelta = timedelta(minutes=30),
+                 ev_update_period: timedelta = timedelta(minutes=15),
+                 havc_update_period: timedelta = timedelta(minutes=5),
+                 mode='Train',
+                 controller = 'RL'):
         """
 
         :param name: name for the controller
@@ -53,14 +71,18 @@ class HEMSController:
         self.ev_update_period = ev_update_period
         self.ess_update_period = ess_update_period
         self.hvac_update_period = havc_update_period
+        # self.mode = mode
+        # Databased definition
         self.hems_database = DataStore(resolution=data_resolution)
         self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
         self.hems_logs.index.name = "timestamp"
         self.control_signals = ControlSignal()
-
+        self.controller = controller
         self.ev_controller = ev_controller(EV_RL_AGENT, resolution=self.resolution,
                                            update_period=self.ev_update_period,
-                                           global_database=self.hems_database)
+                                           global_database=self.hems_database, mode=mode,
+                                           max_charging_power=ev_config.get('charging power W', 7_000) / 1000,
+                                           look_ahead=EV_LOOK_AHEAD)
         if self.ev_controller is not None:
             if ev_tariff is None:
                 self.ev_controller.tariff_handler = meter_tariff
@@ -71,10 +93,10 @@ class HEMSController:
         self.hvac_controller = None
         self.load_forecasting_model = None
         self.generation_forecasting_model = None
-        self.consumptionDataHandler = None  # Uncontrollable load, EV Load, HVAC LOad, Total LOad
-        self.generationDataHandler = None  # PV generation
-        self.storageDataHandler = None
-        self.tariffHandler = None
+
+        # Load models
+
+        self.tariff_handler = None
 
         self.ESS_charge = False
         self.HVAC_ON = False
@@ -117,14 +139,16 @@ class HEMSController:
             'HVAC Consumption (kW)': hvac_info.hvac_power,
             'HVAC Consumption (kWh)': hvac_info.hvac_power * hours,
         }
-        next_24hr_tariff = meter_info.tariff_24hrs
-        next_24hr_feed_tariff = meter_info.feed_tariff_24hrs
+        # next_24hr_tariff = meter_info.tariff_24hrs
+        # next_24hr_feed_tariff = meter_info.feed_tariff_24hrs
 
         # Database test
         self.hems_database.append(now_time, row)  # First update row then collect information
 
         # EV control
+
         self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
+
         # if ev_info.ev_status:
         #     self.control_signals.EV_Max_Power = 7
         # else:
@@ -153,8 +177,6 @@ class HEMSController:
         else:
             self.control_signals.Battery_P_Setpoint = -consumption * 1000
 
-
-
         # if do_ev_update:
         #     df15 = self.hems_database.past_period_resampled(
         #         now_time, past_period=3,
@@ -171,7 +193,7 @@ class HEMSController:
         # logger.commandline(control_signal)
         return control_signal
 
-    def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resilution as well
+    def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resolution as well
         """
         Return exactly N samples ending at now_time, where:
           N = past_period(hours) / data_resolution
@@ -266,3 +288,13 @@ class HEMSController:
             return df.resample(freq).min()
         else:
             raise ValueError(f"Unsupported aggregation: {agg}")
+
+    def save_models(self):
+        os.makedirs(EV_MODEL_DIR, exist_ok=True)
+        EV_PATH = os.path.join(EV_MODEL_DIR, EV_MODEL_NAME)
+        logger.commandline(EV_RL_AGENT.save(EV_PATH))
+        # save command for other models
+
+    def load_models(self):
+        EV_PATH = os.path.join(EV_MODEL_DIR, EV_MODEL_NAME)
+        logger.commandline(EV_RL_AGENT.load(EV_PATH))

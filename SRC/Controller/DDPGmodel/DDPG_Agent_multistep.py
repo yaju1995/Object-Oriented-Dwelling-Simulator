@@ -1,28 +1,6 @@
-"""
-DDPG with Monte Carlo (episodic) returns for continuous action spaces.
-
-Key idea (no bootstrapping):
-  y = G_t
-where:
-  G_t = r_t + gamma r_{t+1} + ... + gamma^{T-1-t} r_{T-1}
-and T is the terminal step of the episode.
-
-This file includes:
-- MLP helper
-- Actor / Critic networks
-- ReplayBuffer that stores (s, a, G, s_terminal, done=1, gamma_pow=0)
-- EpisodeReturnAdder that converts 1-step env transitions into MC-return transitions
-- DDPGConfig
-- DDPGAgent (choose_action, store_transition, train, save, load)
-
-Notes:
-- Monte Carlo targets can be high-variance. You’ll often want larger batches, reward normalization,
-  and/or using TD(lambda) / n-step instead for stability.
-"""
-
 import random
 from dataclasses import dataclass
-from typing import Deque, Optional, Tuple
+from typing import Deque, Optional, Tuple, Literal
 from collections import deque
 
 import numpy as np
@@ -48,7 +26,7 @@ class ActorNetwork(nn.Module):
         super().__init__()
         self.net = mlp([obs_dim, *hidden, act_dim],
                        activation=activation[0],
-                       out_act=activation[1])  # tanh => [-1,1]
+                       out_act=activation[1])
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.net(obs)
@@ -68,42 +46,39 @@ class CriticNetwork(nn.Module):
 
 
 # ---------------------------
-# Replay Buffer (MC-return)
+# Replay Buffer (generic)
+# ---------------------------
+# ---------------------------
+# Replay Buffer (n-step)
 # ---------------------------
 class ReplayBuffer:
     """
     Stores tuples:
-      (s, a, G, sT, doneT, gamma_pow)
-
-    For Monte Carlo episodic targets we store:
-      doneT = 1.0
-      gamma_pow = 0.0
-    so the generic target formula
-      y = G + gamma_pow*(1-doneT)*Q_target(...)
-    reduces to y = G.
+      (s, a, Rn, sN, doneN, gamma_pow)
+    where gamma_pow is gamma^k (k steps actually used).
     """
     def __init__(self, capacity: int = 100_000):
         self.buf: Deque[Tuple[np.ndarray, np.ndarray, float, np.ndarray, float, float]] = deque(maxlen=capacity)
 
-    def push_mc(self, s, a, G: float, sT, doneT: float = 1.0, gamma_pow: float = 0.0):
+    def push(self, s, a, Rn: float, sN, doneN: float, gamma_pow: float):
         self.buf.append((
             np.asarray(s, dtype=np.float32),
             np.asarray(a, dtype=np.float32),
-            float(G),
-            np.asarray(sT, dtype=np.float32),
-            float(doneT),
+            float(Rn),
+            np.asarray(sN, dtype=np.float32),
+            float(doneN),
             float(gamma_pow),
         ))
 
     def sample(self, batch_size: int):
         batch = random.sample(self.buf, batch_size)
-        s, a, G, sT, dT, gp = zip(*batch)
+        s, a, Rn, sN, dN, gp = zip(*batch)
         return (
             np.asarray(s, dtype=np.float32),
             np.asarray(a, dtype=np.float32),
-            np.asarray(G, dtype=np.float32),
-            np.asarray(sT, dtype=np.float32),
-            np.asarray(dT, dtype=np.float32),
+            np.asarray(Rn, dtype=np.float32),
+            np.asarray(sN, dtype=np.float32),
+            np.asarray(dN, dtype=np.float32),
             np.asarray(gp, dtype=np.float32),
         )
 
@@ -112,21 +87,81 @@ class ReplayBuffer:
 
 
 # ---------------------------
-# Episode collector -> Monte Carlo returns
+# n-step transition builder
+# ---------------------------
+class NStepAdder:
+    """
+    Collects 1-step transitions, emits n-step transitions into main_buffer.
+
+    tmp stores up to n items of (s, a, r, s2, done).
+    When enough steps collected (or episode ends), it computes:
+      s0, a0,
+      Rn = sum_{i=0..k-1} gamma^i r_i
+      sN = s_{t+k}
+      doneN = done encountered within k steps (0 or 1)
+      gamma_pow = gamma^k
+    """
+    def __init__(self, n: int, gamma: float, main_buffer: ReplayBuffer):
+        assert n >= 1
+        self.n = n
+        self.gamma = gamma
+        self.main_buffer = main_buffer
+        self.tmp: Deque[Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]] = deque(maxlen=n)
+
+    def reset(self):
+        self.tmp.clear()
+
+    def _compute(self):
+        R = 0.0
+        gamma_pow = 1.0
+
+        s0, a0 = self.tmp[0][0], self.tmp[0][1]
+
+        # build R until terminal or until we consumed current tmp contents
+        s_last, done_last = None, 0.0
+        for (_, _, r, s2, done) in self.tmp:
+            R += gamma_pow * float(r)
+            s_last = s2
+            done_last = float(done)
+            if done:
+                break
+            gamma_pow *= self.gamma
+
+        # gamma_pow is gamma^k, where k is number of rewards used
+        return s0, a0, R, s_last, done_last, gamma_pow
+
+    def add(self, s, a, r, s2, done: bool):
+        self.tmp.append((s, a, r, s2, done))
+
+        # if we don't yet have n steps and not terminal, wait for more
+        if len(self.tmp) < self.n and not done:
+            return
+
+        # emit one n-step transition starting at tmp[0]
+        s0, a0, Rn, sN, dN, gp = self._compute()
+        self.main_buffer.push(s0, a0, Rn, sN, dN, gp)
+
+        # shift window by one
+        self.tmp.popleft()
+
+        # if terminal, flush remaining partial windows
+        if done:
+            while len(self.tmp) > 0:
+                s0, a0, Rn, sN, dN, gp = self._compute()
+                self.main_buffer.push(s0, a0, Rn, sN, dN, gp)
+                self.tmp.popleft()
+
+
+# ---------------------------
+# MC (episode) builder
 # ---------------------------
 class EpisodeReturnAdder:
     """
-    Collects 1-step transitions for ONE episode, then on done=True,
-    computes Monte Carlo returns and pushes all steps into main_buffer.
-
-    Stores tmp items:
-      (s_t, a_t, r_t, s_{t+1}, done_t)
-
-    On terminal:
-      For t from 0..T-1:
-        G_t = r_t + gamma r_{t+1} + ... + gamma^{T-1-t} r_{T-1}
-      Push (s_t, a_t, G_t, s_T, done=1, gamma_pow=0)
-      where s_T is the terminal next_state of the final transition.
+    On episode end, emits MC transitions for each step:
+      G_t = r_t + gamma r_{t+1} + ... + gamma^{T-1-t} r_{T-1}
+    Stored as:
+      (s_t, a_t, G_t, s_T, done=1, gamma_pow=0)
+    so the generic target reduces to y = G_t.
     """
     def __init__(self, gamma: float, main_buffer: ReplayBuffer):
         self.gamma = float(gamma)
@@ -142,24 +177,46 @@ class EpisodeReturnAdder:
         if not done:
             return
 
-        # Terminal reached: compute returns backwards
-        # s_terminal is the next_state of the last transition
         s_terminal = self.tmp[-1][3]
 
         G = 0.0
-        # iterate backwards over rewards
         for (s_t, a_t, r_t, _s2, _done) in reversed(self.tmp):
             G = r_t + self.gamma * G
-            self.main_buffer.push_mc(
-                s=s_t,
-                a=a_t,
-                G=G,
-                sT=s_terminal,
-                doneT=1.0,
-                gamma_pow=0.0
-            )
+            # done=1, gamma_pow=0 => no bootstrap term
+            self.main_buffer.push(s_t, a_t, G, s_terminal, 1.0, 0.0)
 
         self.reset()
+
+
+# ---------------------------
+# One "collector" wrapper to support nstep / mc / hybrid
+# ---------------------------
+ReturnMode = Literal["nstep", "mc", "hybrid"]
+
+
+class ReturnCollector:
+    """
+    mode:
+      - "nstep": only n-step transitions
+      - "mc": only MC transitions (buffer fills only at episode end)
+      - "hybrid": store BOTH (n-step online + MC at episode end)
+    """
+    def __init__(self, mode: ReturnMode, gamma: float, buffer: ReplayBuffer, n_step: int = 4):
+        self.mode = mode
+        self.nstep = NStepAdder(n=n_step, gamma=gamma, main_buffer=buffer) if mode in ("nstep", "hybrid") else None
+        self.mc = EpisodeReturnAdder(gamma=gamma, main_buffer=buffer) if mode in ("mc", "hybrid") else None
+
+    def reset(self):
+        if self.nstep is not None:
+            self.nstep.reset()
+        if self.mc is not None:
+            self.mc.reset()
+
+    def add(self, s, a, r, s2, done: bool):
+        if self.nstep is not None:
+            self.nstep.add(s, a, r, s2, done)
+        if self.mc is not None:
+            self.mc.add(s, a, r, s2, done)
 
 
 # ---------------------------
@@ -180,15 +237,23 @@ class DDPGConfig:
 
 
 # ---------------------------
-# DDPG Agent (MC-return)
+# DDPG Agent (generic target works for both)
 # ---------------------------
 class DDPGAgent:
-    def __init__(self, obs_dim: int, act_dim: int, cfg: DDPGConfig):
+    def __init__(
+        self,
+        obs_dim: int,
+        act_dim: int,
+        cfg: DDPGConfig,
+        return_mode: ReturnMode = "nstep",
+        n_step: int = 4
+    ):
         self.cfg = cfg
         self.device = cfg.device
         self.gamma = cfg.gamma
         self.tau = cfg.tau
         self.batch_size = cfg.batch_size
+        self.n_step = n_step
 
         # seeds
         random.seed(cfg.seed)
@@ -210,53 +275,43 @@ class DDPGAgent:
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
 
-        # replay + episode adder
+        # replay + return collector
         self.buffer = ReplayBuffer(cfg.buffer_capacity)
-        self.mc_adder = EpisodeReturnAdder(gamma=self.gamma, main_buffer=self.buffer)
+        self.collector = ReturnCollector(mode=return_mode, gamma=self.gamma, buffer=self.buffer, n_step=n_step)
 
     @torch.no_grad()
     def choose_action(self, state, noise_std: float = 0.1):
-        """
-        Returns normalized action in [-1, 1] (assuming actor uses Tanh).
-        If your env expects different bounds, scale outside this method.
-        """
         s = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         a = self.actor(s).cpu().numpy()[0]
         if noise_std > 0:
             a = a + np.random.normal(0.0, noise_std, size=a.shape)
-        return np.clip(a, -1.0, 1.0)
+        return np.clip(a, -0.0, 1.0)
 
     def store_transition(self, state, action, reward: float, next_state, done: bool):
-        """
-        Feed 1-step env transition; internally this stores full-episode MC returns when done=True.
-        IMPORTANT: this means the replay buffer only grows at episode end.
-        """
-        self.mc_adder.add(state, action, reward, next_state, done)
+        self.collector.add(state, action, reward, next_state, done)
 
     def train(self, batch_size: Optional[int] = None):
         if batch_size is None:
             batch_size = self.batch_size
         if len(self.buffer) < batch_size:
             return None
-
-        states, actions, Gt, next_states_T, dones_T, gamma_pows = self.buffer.sample(batch_size)
+        # print('Updating!')
+        states, actions, R, next_states, dones, gamma_pows = self.buffer.sample(batch_size)
 
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.tensor(actions, dtype=torch.float32, device=self.device)
-        Gt = torch.tensor(Gt, dtype=torch.float32, device=self.device).unsqueeze(1)
-
-        # (These are present for compatibility; for MC we do not bootstrap)
-        next_states_T = torch.tensor(next_states_T, dtype=torch.float32, device=self.device)
-        dones_T = torch.tensor(dones_T, dtype=torch.float32, device=self.device).unsqueeze(1)
+        R = torch.tensor(R, dtype=torch.float32, device=self.device).unsqueeze(1)
+        next_states = torch.tensor(next_states, dtype=torch.float32, device=self.device)
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
         gamma_pows = torch.tensor(gamma_pows, dtype=torch.float32, device=self.device).unsqueeze(1)
 
-        # ----- Critic update (MC target) -----
-        # Generic form: y = G + gamma_pow*(1-done)*Q_target(...)
-        # For stored MC transitions: gamma_pow=0 and done=1 => y=G
+        # Works for both:
+        # - n-step: gamma_pows=gamma^k and dones maybe 0
+        # - MC: gamma_pows=0 and dones=1 => y = R (R is G)
         with torch.no_grad():
-            next_actions_T = self.actor_target(next_states_T)
-            target_q_T = self.critic_target(next_states_T, next_actions_T)
-            y = Gt + gamma_pows * (1.0 - dones_T) * target_q_T  # reduces to Gt
+            next_actions = self.actor_target(next_states)
+            target_q = self.critic_target(next_states, next_actions)
+            y = R + gamma_pows * (1.0 - dones) * target_q
 
         current_q = self.critic(states, actions)
         critic_loss = nn.MSELoss()(current_q, y)
@@ -279,7 +334,7 @@ class DDPGAgent:
 
         return {
             "critic_loss": float(critic_loss.item()),
-            "actor_loss": float(actor_loss.item()),
+            "actor_loss": float(actor_loss.item())
         }
 
     def soft_update(self, net: nn.Module, target_net: nn.Module):
@@ -298,7 +353,7 @@ class DDPGAgent:
                 "actor_opt": self.actor_optimizer.state_dict(),
                 "critic_opt": self.critic_optimizer.state_dict(),
                 "cfg": self.cfg.__dict__,
-                "mode": "monte_carlo_returns",
+                "n_step": self.n_step,
             }, path)
             return f"Model saved successfully at: {path}"
         except Exception as e:
@@ -318,6 +373,12 @@ class DDPGAgent:
             self.actor_optimizer.load_state_dict(ckpt["actor_opt"])
             self.critic_optimizer.load_state_dict(ckpt["critic_opt"])
 
+            # restore n_step with check
+            if "n_step" in ckpt:
+                if ckpt["n_step"] != self.n_step:
+                    return f"Warning: n_step mismatch (ckpt={ckpt['n_step']}, current={self.n_step})"
+                self.n_step = ckpt["n_step"]
+
             # ensure optimizer tensors are on correct device
             for st in self.actor_optimizer.state.values():
                 for k, v in st.items():
@@ -330,12 +391,11 @@ class DDPGAgent:
                         st[k] = v.to(self.device)
 
             return f"Model loaded successfully from: {path}"
+
         except Exception as e:
             return f"Error loading model from {path}: {e}"
 
-    def reset_episode(self):
-        """
-        Call at episode boundary if you manually manage episodes.
-        (Not strictly required if you always pass done=True at terminal.)
-        """
-        self.mc_adder.reset()
+
+    def reset_return_builder(self):
+        """Call at episode boundary if needed."""
+        self.collector.reset()

@@ -144,5 +144,5 @@ while current_time <= end_time:  # need to change this to timedelta for
 
     # print(current_time, inverter.time) # checking the sync of time between simulation and simulator
     current_time += RESOLUTION
-Controller.hems_logs.to_csv('./Results/controller_test.csv')
-House.simulation_df.to_csv('./Results/simulation_test.csv')
+Controller.hems_logs.to_csv('./Results/controller_test_DDPG_03_cost_test.csv')
+House.simulation_df.to_csv('./Results/simulation_test_DDPG_03_cost_test.csv')

@@ -230,7 +230,7 @@ class DDPGAgent:
         a = self.actor(s).cpu().numpy()[0]
         if noise_std > 0:
             a = a + np.random.normal(0.0, noise_std, size=a.shape)
-        return np.clip(a, -1.0, 1.0)
+        return np.clip(a, -0.0, 1.0)
 
     def store_transition(self, state, action, reward: float, next_state, done: bool):
         """
@@ -291,38 +291,56 @@ class DDPGAgent:
                 tp.data.add_(self.tau * p.data)
 
     def save(self, path: str):
-        torch.save({
-            "actor": self.actor.state_dict(),
-            "critic": self.critic.state_dict(),
-            "actor_target": self.actor_target.state_dict(),
-            "critic_target": self.critic_target.state_dict(),
-            "actor_opt": self.actor_optimizer.state_dict(),
-            "critic_opt": self.critic_optimizer.state_dict(),
-            "cfg": self.cfg.__dict__,
-            "n_step": self.n_step,
-        }, path)
+        try:
+            torch.save({
+                "actor": self.actor.state_dict(),
+                "critic": self.critic.state_dict(),
+                "actor_target": self.actor_target.state_dict(),
+                "critic_target": self.critic_target.state_dict(),
+                "actor_opt": self.actor_optimizer.state_dict(),
+                "critic_opt": self.critic_optimizer.state_dict(),
+                "cfg": self.cfg.__dict__,
+                "n_step": self.n_step,
+            }, path)
+            return f"Model saved successfully at: {path}"
+        except Exception as e:
+            return f"Error saving model to {path}:: Error: {e}"
 
     def load(self, path: str, map_location: Optional[str] = None):
-        if map_location is None:
-            map_location = self.device
-        ckpt = torch.load(path, map_location=map_location)
+        try:
+            if map_location is None:
+                map_location = self.device
 
-        self.actor.load_state_dict(ckpt["actor"])
-        self.critic.load_state_dict(ckpt["critic"])
-        self.actor_target.load_state_dict(ckpt["actor_target"])
-        self.critic_target.load_state_dict(ckpt["critic_target"])
-        self.actor_optimizer.load_state_dict(ckpt["actor_opt"])
-        self.critic_optimizer.load_state_dict(ckpt["critic_opt"])
+            ckpt = torch.load(path, map_location=map_location, weights_only=False)
 
-        # make sure optimizer tensors are on correct device
-        for st in self.actor_optimizer.state.values():
-            for k, v in st.items():
-                if torch.is_tensor(v):
-                    st[k] = v.to(self.device)
-        for st in self.critic_optimizer.state.values():
-            for k, v in st.items():
-                if torch.is_tensor(v):
-                    st[k] = v.to(self.device)
+            self.actor.load_state_dict(ckpt["actor"])
+            self.critic.load_state_dict(ckpt["critic"])
+            self.actor_target.load_state_dict(ckpt["actor_target"])
+            self.critic_target.load_state_dict(ckpt["critic_target"])
+            self.actor_optimizer.load_state_dict(ckpt["actor_opt"])
+            self.critic_optimizer.load_state_dict(ckpt["critic_opt"])
+
+            # restore n_step with check
+            if "n_step" in ckpt:
+                if ckpt["n_step"] != self.n_step:
+                    return f"Warning: n_step mismatch (ckpt={ckpt['n_step']}, current={self.n_step})"
+                self.n_step = ckpt["n_step"]
+
+            # ensure optimizer tensors are on correct device
+            for st in self.actor_optimizer.state.values():
+                for k, v in st.items():
+                    if torch.is_tensor(v):
+                        st[k] = v.to(self.device)
+
+            for st in self.critic_optimizer.state.values():
+                for k, v in st.items():
+                    if torch.is_tensor(v):
+                        st[k] = v.to(self.device)
+
+            return f"Model loaded successfully from: {path}"
+
+        except Exception as e:
+            return f"Error loading model from {path}: {e}"
 
     def reset_nstep(self):
         """
