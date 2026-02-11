@@ -310,7 +310,7 @@ class ESSHandler:
         self.avai_capacity_Wh = (soc_pct / 100.0) * self.total_capacity_Wh
 
         logger.commandline(
-            f"[ESS] SOC externally set to {soc_pct:.2f}% "
+            f"[ESS] {self.name}:SOC externally set to {soc_pct:.2f}% "
             f"({self.avai_capacity_Wh:.2f} Wh)"
         )
 

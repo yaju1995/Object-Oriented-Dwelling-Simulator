@@ -68,6 +68,9 @@ class dwelling:
         self.EVModel = EVModel()
         self.HVACModel = HVACModel()
 
+        # seed setup
+        self.rng = np.random.default_rng(seed)
+
     def initialized_df(self):
         meter_df = pd.DataFrame(
             0.0,
@@ -134,16 +137,26 @@ class dwelling:
             self.simulation_df = self.simulation_df.join(weather_df)
             if self.pv_config:
                 logger.commandline(self.pv_config)
-                required_keys = {"capacity W", "efficiency", "area per W", "tilt", "azimuth"}
+                required_keys = {"type","capacity W", "efficiency", "area per W", "tilt", "azimuth"}
                 missing = required_keys - self.pv_config.keys()
+                pv_rating = self.pv_config.get('capacity W', 0) / 1000
+                pv_efficiency = self.pv_config.get('efficiency', 1)
+
                 if missing:
                     logger.raise_error(f"Missing required keys in self.demand: {missing}")
                     return
-                logger.commandline('PV conf detected setting up PV generation using weather file')
-                pv_rating = self.pv_config.get('capacity W', 0) / 1000
-                pv_efficiency = self.pv_config.get('efficiency', 1)
+                # check the type :
+                pv_config_type = self.pv_config.get('type')
+                if pv_config_type == 'train':
+                    logger.commandline('PV conf detected setting up PV generation for training setup')
+                    # len from the weather file fille the colum with random 0 to 1000 value
+                    self.simulation_df["Global Horizontal Radiation"] = self.rng.uniform(low=0, high=1000, size=len(self.simulation_df)
+)
+                else: # use the
+                    logger.commandline('PV conf detected setting up PV generation using weather file')
+
                 ghi = self.simulation_df["Global Horizontal Radiation"].fillna(0)
-                pv_df = (ghi / 1000.0) * pv_efficiency * pv_rating
+                pv_df = np.round((ghi / 1000.0) * pv_efficiency * pv_rating, 3)
                 pv_df = pv_df.clip(lower=0)
 
                 pv_df.name = "PV Electric Power (kW)"

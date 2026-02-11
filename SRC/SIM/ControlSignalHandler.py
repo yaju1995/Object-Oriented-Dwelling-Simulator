@@ -5,7 +5,7 @@ from pydantic import BaseModel
 class ControlSignal(BaseModel):
     HVAC_Heating_Setpoint: Optional[float] = None # Degree Celcius
     HVAC_Heating_Power: Optional[float] = None # Watt
-    Battery_P_Setpoint: Optional[float] = None # Wath
+    Battery_P_Setpoint: Optional[float] = None # Watt
     EV_Max_Power: Optional[float] = None # Watt
     Lighting_P_Setpoint: Optional[float] = None # Percentage
     Water_Heating_Setpoint: Optional[float] = None # Watt

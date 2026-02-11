@@ -55,16 +55,31 @@ class UniformTariffGenerator(BaseTariffGenerator):
 
 
 class RandomTariffGenerator(BaseTariffGenerator):
-    def __init__(self, low: float, high: float,
-                 resolution: timedelta = timedelta(minutes=1)):
+    def __init__(
+        self,
+        low: float,
+        high: float,
+        resolution: timedelta = timedelta(minutes=1),
+        seed: int | None = None
+    ):
         super().__init__(resolution)
         self.low = low
         self.high = high
 
+        # Create a dedicated RNG for this generator
+        self.rng = np.random.default_rng(seed)
+
     def generate_tariff(self) -> pd.DataFrame:
         idx = self.time_index
-        values = np.round(np.random.uniform(self.low, self.high, size=len(idx)),3)
+
+        # Use the generator's RNG (not global np.random)
+        values = np.round(
+            self.rng.uniform(self.low, self.high, size=len(idx)),
+            3
+        )
+
         return pd.DataFrame({"value": values}, index=idx)
+
 
 
 if __name__ == '__main__':

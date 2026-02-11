@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
-from SRC.SIM.Tariff.tariffHandler import tariffHandler
+
 
 # defining equipment from OCHER
 class battery(BaseModel):

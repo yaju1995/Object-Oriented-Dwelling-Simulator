@@ -126,6 +126,15 @@ class DataStore:
             return None
         return self.get_resampled(w, out_resolution, headers, agg)
 
+    # Sample code ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # df15 = self.hems_database.past_period_resampled(
+    #         now_time, past_period=3,
+    #         out_resolution=timedelta(minutes=15),
+    #         headers=["Consumption (kWh)", "Generation (kWh)"],
+    #         agg="sum",
+    #     )
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     def get_instant_state(
             self,
             keys: list[str],

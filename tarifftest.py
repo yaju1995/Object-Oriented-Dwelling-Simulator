@@ -1,5 +1,6 @@
 from SRC.SIM.Tariff.tariffHandler import tariffHandler
-from datetime import datetime, timedelta
+from datetime import datetime
+
 tariff = tariffHandler()
 
 

@@ -57,7 +57,8 @@ class ReplayBuffer:
       (s, a, Rn, sN, doneN, gamma_pow)
     where gamma_pow is gamma^k (k steps actually used).
     """
-    def __init__(self, capacity: int = 100_000, seed: int = None ):
+
+    def __init__(self, capacity: int = 100_000, seed: int = None):
         self.buf: Deque[Tuple[np.ndarray, np.ndarray, float, np.ndarray, float, float]] = deque(maxlen=capacity)
         self.rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -102,6 +103,7 @@ class NStepAdder:
       doneN = done encountered within k steps (0 or 1)
       gamma_pow = gamma^k
     """
+
     def __init__(self, n: int, gamma: float, main_buffer: ReplayBuffer):
         assert n >= 1
         self.n = n
@@ -164,6 +166,7 @@ class EpisodeReturnAdder:
       (s_t, a_t, G_t, s_T, done=1, gamma_pow=0)
     so the generic target reduces to y = G_t.
     """
+
     def __init__(self, gamma: float, main_buffer: ReplayBuffer):
         self.gamma = float(gamma)
         self.main_buffer = main_buffer
@@ -202,6 +205,7 @@ class ReturnCollector:
       - "mc": only MC transitions (buffer fills only at episode end)
       - "hybrid": store BOTH (n-step online + MC at episode end)
     """
+
     def __init__(self, mode: ReturnMode, gamma: float, buffer: ReplayBuffer, n_step: int = 4):
         self.mode = mode
         self.nstep = NStepAdder(n=n_step, gamma=gamma, main_buffer=buffer) if mode in ("nstep", "hybrid") else None
@@ -230,7 +234,7 @@ class DDPGConfig:
     actor_lr: float = 1e-4
     critic_lr: float = 1e-4
     buffer_capacity: int = 100_000
-    hidden: Tuple[int, int] = (128, 128)
+    hidden: Tuple[int, int] = (64, 64)
     activation: Tuple = (nn.ReLU, nn.Tanh)
     batch_size: int = 128
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -242,15 +246,15 @@ class DDPGConfig:
 # ---------------------------
 # DDPG Agent (generic target works for both)
 # ---------------------------
-class DDPGAgent:
+class Bound_DDPGAgent:
     def __init__(
-        self,
-        name:str,
-        obs_dim: int,
-        act_dim: int,
-        cfg: DDPGConfig,
-        return_mode: ReturnMode = "nstep",
-        n_step: int = 4
+            self,
+            name:str,
+            obs_dim: int,
+            act_dim: int,
+            cfg: DDPGConfig,
+            return_mode: ReturnMode = "nstep",
+            n_step: int = 4
     ):
         self.name = name
         self.cfg = cfg
@@ -288,13 +292,46 @@ class DDPGAgent:
         self.a_max = self.cfg.a_max
         self.a_min = self.cfg.a_min
 
+        self.bound_fn = self.default_bound_fn
+
+    def get_action_bounds(self, state, bound_fn=None):
+        """
+        Compute action bounds based on state and custom logic.
+
+        Parameters:
+        - state: array-like, normalized state ∈ [0, 1]
+        - bound_fn: callable(state) → (a_min, a_max)
+            - if None: use default_bound_fn
+
+        Returns:
+        - a_min, a_max: np arrays
+        """
+        if not callable(bound_fn):
+            raise ValueError("bound_fn must be a callable that takes state and returns (a_min, a_max)")
+
+        if bound_fn is None:
+            bound_fn = self.default_bound_fn
+        return bound_fn(state)
+
+    def default_bound_fn(self, state):
+        # Always return static range (no state logic)
+        return np.array([-0.5]), np.array([0.5])
+
+    def scale_action(self, raw_action, a_min, a_max):
+        return a_min + 0.5 * (raw_action + 1.0) * (a_max - a_min)
+
     @torch.no_grad()
-    def choose_action(self, state, noise_std: float = 0.1):
+    def choose_action(self, state, noise_std: float = 0.1, bound_fn=None):
         s = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-        a = self.actor(s).cpu().numpy()[0]
+        ra = self.actor(s).cpu().numpy()[0]  # ra raw action
+
+        a_min, a_max = self.get_action_bounds(state, bound_fn)
+
+        a = self.scale_action(ra, a_min, a_max)
+        # print(state, a_min, a_max, noise_std, ra, a)
         if noise_std > 0:
             a = a + self.rng.normal(0.0, noise_std, size=a.shape)
-        return np.clip(a, self.a_min, self.a_max)
+        return np.clip(a, a_min, a_max)
 
     def store_transition(self, state, action, reward: float, next_state, done: bool):
         self.collector.add(state, action, reward, next_state, done)
@@ -314,11 +351,23 @@ class DDPGAgent:
         dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
         gamma_pows = torch.tensor(gamma_pows, dtype=torch.float32, device=self.device).unsqueeze(1)
 
+        # Get dynamic bounds for each next_state (batched)
+        ns_np = next_states.detach().cpu().numpy()
+        a_min_list, a_max_list = [], []
+        for ns in next_states:
+            amin, amax = self.get_action_bounds(ns, self.bound_fn)
+            a_min_list.append(amin)
+            a_max_list.append(amax)
+        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32)
+        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32)
+
         # Works for both:
         # - n-step: gamma_pows=gamma^k and dones maybe 0
         # - MC: gamma_pows=0 and dones=1 => y = R (R is G)
         with torch.no_grad():
-            next_actions = self.actor_target(next_states)
+            next_raw_actions = self.actor_target(next_states)
+            next_actions = self.scale_action(next_raw_actions, a_min_tensor, a_max_tensor)
+            # next_actions = a_min_tensor + 0.5 * (next_raw_actions + 1.0) * (a_max_tensor - a_min_tensor)
             target_q = self.critic_target(next_states, next_actions)
             y = R + gamma_pows * (1.0 - dones) * target_q
 
@@ -329,8 +378,18 @@ class DDPGAgent:
         critic_loss.backward()
         self.critic_optimizer.step()
 
+        # Get dynamic bounds for current states
+        a_min_list, a_max_list = [], []
+        for s in states.numpy():
+            amin, amax = self.get_action_bounds(s, self.bound_fn)
+            a_min_list.append(amin)
+            a_max_list.append(amax)
+        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32)
+        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32)
         # ----- Actor update -----
-        actor_actions = self.actor(states)
+        raw_actor_actions = self.actor(states)
+        actor_actions = self.scale_action(raw_actor_actions, a_min_tensor, a_max_tensor)
+        # actor_actions = a_min_tensor + 0.5 * (raw_actor_actions + 1.0) * (a_max_tensor - a_min_tensor)
         actor_loss = -self.critic(states, actor_actions).mean()
 
         self.actor_optimizer.zero_grad()
@@ -403,7 +462,6 @@ class DDPGAgent:
 
         except Exception as e:
             return f"Error loading model from {path}: {e}"
-
 
     def reset_return_builder(self):
         """Call at episode boundary if needed."""
