@@ -110,7 +110,7 @@ class dwelling:
                 start_date=self.start_time,
                 duration_days=self.duration,
                 resolution=self.resolution,
-                seed=self.seed,
+                seed=self.seed+1,
                 column_name="Demand Electric Power (kW)",
             )
             # plot value

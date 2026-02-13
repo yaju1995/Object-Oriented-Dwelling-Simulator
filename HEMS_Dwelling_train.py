@@ -15,8 +15,8 @@ from SRC.Controller.HEMSControlLib import HEMSController
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 import matplotlib.pyplot as plt
 
-RESOLUTION = timedelta(minutes=15)  # 1 min resolution info
-DURATION = timedelta(days=300)
+RESOLUTION = timedelta(minutes=60)  # 1 min resolution info
+DURATION = timedelta(days=1000)
 START_TIME = datetime(2018, 1, 1)
 
 # demand_config = {
@@ -40,27 +40,27 @@ House = dwelling(name='Dwelling_1',
 # House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 
-Tariff_gen = RandomTariffGenerator(low=0.1, high=0.5, resolution=timedelta(minutes=15), seed=SEED)
+Tariff_gen = RandomTariffGenerator(low=0.1, high=0.4, resolution=timedelta(minutes=60), seed=SEED)
 House.tariff.tariff_model = Tariff_gen
 House.tariff.feed_tariff_model = Tariff_gen
 House.tariff.generate_tariff()  # First Generate
 House.tariff.updated_tariff()  # Then Update
 House.initialized_df()
 
-ev_controller_config = {
-    'update period': timedelta(minutes=15),
-    'ev_config': ev_config
-}
-
-ess_controller_config ={
-
-}
+# ev_controller_config = {
+#     'update period': timedelta(minutes=15),
+#     'ev_config': ev_config
+# }
+#
+# ess_controller_config ={
+#
+# }
 
 # # Defining controller
 Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter_tariff=House.tariff,
-                            ev_update_period=timedelta(minutes=15),
-                            ess_update_period=timedelta(minutes=15),
-                            havc_update_period=timedelta(minutes=5),
+                            ev_update_period=timedelta(minutes=60),
+                            ess_update_period=timedelta(minutes=60),
+                            havc_update_period=timedelta(minutes=60),
                             ev_config=ev_config,
                             ess_config=battery_config,
                             hvac_config=thermal_config)
@@ -103,7 +103,7 @@ while current_time <= end_time:
         print(f'{current_time.time()}: Mid night update tariff')
         House.tariff.updated_tariff()
         # update the SOC external for training
-        next_soc = House.Battery.set_soc(random.uniform(0, 1))
+        next_soc = House.Battery.set_soc(random.uniform(0.05, 1)) # reset that will occure
     # if 24 hrs update tariff like in real case scenario
     # when and how will the tariff be updated
     # and if there is gap then how will the tariff be handled

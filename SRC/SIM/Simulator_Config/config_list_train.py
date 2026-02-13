@@ -1,8 +1,8 @@
 battery_config = {
-    "capacity Wh": 20_000,
-    "initial soc": 50,
-    "charging power W": 10_000,
-    "discharging power W": 10_000,
+    "capacity Wh": 10_000,
+    "initial soc": 100,
+    "charging power W": 5_000,
+    "discharging power W": 5_000,
     "charging eff": 1,
     "discharging eff": 1,
 }
@@ -28,7 +28,7 @@ thermal_config = {
 # file path to the data for the model
 demand_config = {
     'model': 'uniform',
-    'file': './SRC/SIM/Defaults/Demand/15_min_uniform_20kva.csv'
+    'file': './SRC/SIM/Defaults/Demand/15_min_uniform_10kva.csv'
 }
 
 # Weather file is the just Path ot name of the CSV with .epw
@@ -38,8 +38,8 @@ weather_file = './SRC/SIM/Defaults/Weather/IRL_Dublin.039690_IWEC.epw'
 
 pv_config = {
     'type':'train',
-    'seed':0,
-    "capacity W": 20_000,  # only used
+    'seed':1,
+    "capacity W": 10_000,  # only used
     "efficiency": 1,  # only used
     "area per W": 1,  # pending
     "tilt": 20,  # pending

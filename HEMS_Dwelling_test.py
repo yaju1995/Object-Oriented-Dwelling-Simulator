@@ -34,7 +34,7 @@ House = dwelling(name='Dwelling_1',
 # House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # TOU tariff
 House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
-House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
+House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
 
 # add TOU tariff day night and peak tariff
 # Initialized House
@@ -45,7 +45,7 @@ House.initialized_df()
 Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter_tariff=House.tariff,
                             ev_update_period=timedelta(minutes=15),
                             ess_update_period= timedelta(minutes=15),
-                            havc_update_period=timedelta(minutes=5),
+                            havc_update_period=timedelta(minutes=15),
                             mode='Test',controller='RL',
                             ev_config=ev_config,
                             ess_config=battery_config,

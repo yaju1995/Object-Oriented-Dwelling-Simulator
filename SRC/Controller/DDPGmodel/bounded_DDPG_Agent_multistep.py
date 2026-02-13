@@ -231,8 +231,8 @@ class ReturnCollector:
 class DDPGConfig:
     gamma: float = 0.99
     tau: float = 0.005
-    actor_lr: float = 1e-4
-    critic_lr: float = 1e-4
+    actor_lr: float = 1e-3
+    critic_lr: float = 1e-3
     buffer_capacity: int = 100_000
     hidden: Tuple[int, int] = (64, 64)
     activation: Tuple = (nn.ReLU, nn.Tanh)
@@ -295,22 +295,10 @@ class Bound_DDPGAgent:
         self.bound_fn = self.default_bound_fn
 
     def get_action_bounds(self, state, bound_fn=None):
-        """
-        Compute action bounds based on state and custom logic.
-
-        Parameters:
-        - state: array-like, normalized state ∈ [0, 1]
-        - bound_fn: callable(state) → (a_min, a_max)
-            - if None: use default_bound_fn
-
-        Returns:
-        - a_min, a_max: np arrays
-        """
-        if not callable(bound_fn):
-            raise ValueError("bound_fn must be a callable that takes state and returns (a_min, a_max)")
-
         if bound_fn is None:
             bound_fn = self.default_bound_fn
+        if not callable(bound_fn):
+            raise ValueError("bound_fn must be callable(state)->(a_min,a_max)")
         return bound_fn(state)
 
     def default_bound_fn(self, state):
@@ -341,7 +329,7 @@ class Bound_DDPGAgent:
             batch_size = self.batch_size
         if len(self.buffer) < batch_size:
             return None
-        # print('Updating!')
+        print(f'Updating!{len(self.buffer)} <{batch_size}')
         states, actions, R, next_states, dones, gamma_pows = self.buffer.sample(batch_size)
 
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
@@ -352,14 +340,15 @@ class Bound_DDPGAgent:
         gamma_pows = torch.tensor(gamma_pows, dtype=torch.float32, device=self.device).unsqueeze(1)
 
         # Get dynamic bounds for each next_state (batched)
-        ns_np = next_states.detach().cpu().numpy()
+        # ns_np = next_states.detach().cpu().numpy()
         a_min_list, a_max_list = [], []
-        for ns in next_states:
+        for ns in next_states.detach().cpu().numpy():
             amin, amax = self.get_action_bounds(ns, self.bound_fn)
             a_min_list.append(amin)
             a_max_list.append(amax)
-        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32)
-        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32)
+
+        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32, device=self.device)
+        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32, device=self.device)
 
         # Works for both:
         # - n-step: gamma_pows=gamma^k and dones maybe 0
@@ -380,12 +369,13 @@ class Bound_DDPGAgent:
 
         # Get dynamic bounds for current states
         a_min_list, a_max_list = [], []
-        for s in states.numpy():
+        for s in states.detach().cpu().numpy():
             amin, amax = self.get_action_bounds(s, self.bound_fn)
             a_min_list.append(amin)
             a_max_list.append(amax)
-        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32)
-        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32)
+
+        a_min_tensor = torch.tensor(np.array(a_min_list), dtype=torch.float32, device=self.device)
+        a_max_tensor = torch.tensor(np.array(a_max_list), dtype=torch.float32, device=self.device)
         # ----- Actor update -----
         raw_actor_actions = self.actor(states)
         actor_actions = self.scale_action(raw_actor_actions, a_min_tensor, a_max_tensor)
