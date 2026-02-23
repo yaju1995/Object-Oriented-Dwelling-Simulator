@@ -11,11 +11,11 @@ from SRC.SIM.Simulator_Config.config_list_train import (pv_config,
                                                         battery_config)
 
 from SRC.Controller.Database import PandasDatabase
-from SRC.Controller.HEMSControlLib import HEMSController
+from SRC.Controller.HEMSControlRL import HEMSController
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 import matplotlib.pyplot as plt
-
-RESOLUTION = timedelta(minutes=60)  # 1 min resolution info
+RES = 60
+RESOLUTION = timedelta(minutes=RES)  # 1 min resolution info
 DURATION = timedelta(days=1000)
 START_TIME = datetime(2018, 1, 1)
 
@@ -40,7 +40,7 @@ House = dwelling(name='Dwelling_1',
 # House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 
-Tariff_gen = RandomTariffGenerator(low=0.1, high=0.4, resolution=timedelta(minutes=60), seed=SEED)
+Tariff_gen = RandomTariffGenerator(low=0.1, high=0.4, resolution=timedelta(minutes=RES), seed=SEED)
 House.tariff.tariff_model = Tariff_gen
 House.tariff.feed_tariff_model = Tariff_gen
 House.tariff.generate_tariff()  # First Generate
@@ -58,9 +58,9 @@ House.initialized_df()
 
 # # Defining controller
 Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter_tariff=House.tariff,
-                            ev_update_period=timedelta(minutes=60),
-                            ess_update_period=timedelta(minutes=60),
-                            havc_update_period=timedelta(minutes=60),
+                            ev_update_period=timedelta(minutes=RES),
+                            ess_update_period=timedelta(minutes=RES),
+                            havc_update_period=timedelta(minutes=RES),
                             ev_config=ev_config,
                             ess_config=battery_config,
                             hvac_config=thermal_config)
@@ -79,9 +79,10 @@ start = datetime.now()
 
 # Controller.load_models()
 random.seed(SEED)
-
+day = 0
 # Running a training loop
 while current_time <= end_time:
+
     inverter, meter, ev, hvac, status = House.step(control_signal)
 
     # get state for each controller
@@ -104,12 +105,15 @@ while current_time <= end_time:
         House.tariff.updated_tariff()
         # update the SOC external for training
         next_soc = House.Battery.set_soc(random.uniform(0.05, 1)) # reset that will occure
+        day +=1
+        print(f'{current_time}: day')
     # if 24 hrs update tariff like in real case scenario
     # when and how will the tariff be updated
     # and if there is gap then how will the tariff be handled
-
+    if day in (30,50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950, 1000, 1250, 1500, 1750, 2000):
+        Controller.save_models(day)
 # Save the models
-Controller.save_models()
+
 
 end = datetime.now()
 duration = (end - start).total_seconds()
@@ -140,5 +144,5 @@ print(f"Simulation took {duration:.4f} seconds")
 # print('')
 print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
-Controller.hems_database.df.to_csv('./Results/controller_train.csv')
-House.simulation_df.to_csv('./Results/simulation_train.csv')
+Controller.hems_database.df.to_csv('./Results/controller_train_4.csv')
+House.simulation_df.to_csv('./Results/simulation_train_4.csv')

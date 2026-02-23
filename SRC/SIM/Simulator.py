@@ -110,7 +110,7 @@ class dwelling:
                 start_date=self.start_time,
                 duration_days=self.duration,
                 resolution=self.resolution,
-                seed=self.seed+1,
+                seed=self.seed + 1,
                 column_name="Demand Electric Power (kW)",
             )
             # plot value
@@ -132,12 +132,12 @@ class dwelling:
             logger.commandline('weather conf detected setting up weather infor (Outdoor Temp C)')
             weatherHandler = EPWWeatherHandler(self.weather_file)
             weather_df = weatherHandler.get_simulation_data(start_date=self.start_time,
-                                                        resolution=self.resolution,
-                                                        duration=self.duration)
+                                                            resolution=self.resolution,
+                                                            duration=self.duration)
             self.simulation_df = self.simulation_df.join(weather_df)
             if self.pv_config:
                 logger.commandline(self.pv_config)
-                required_keys = {"type","capacity W", "efficiency", "area per W", "tilt", "azimuth"}
+                required_keys = {"type", "capacity W", "efficiency", "area per W", "tilt", "azimuth"}
                 missing = required_keys - self.pv_config.keys()
                 pv_rating = self.pv_config.get('capacity W', 0) / 1000
                 pv_efficiency = self.pv_config.get('efficiency', 1)
@@ -149,10 +149,11 @@ class dwelling:
                 pv_config_type = self.pv_config.get('type')
                 if pv_config_type == 'train':
                     logger.commandline('PV conf detected setting up PV generation for training setup')
-                    # len from the weather file fille the colum with random 0 to 1000 value
-                    self.simulation_df["Global Horizontal Radiation"] = self.rng.uniform(low=0, high=1000, size=len(self.simulation_df)
-)
-                else: # use the
+                    # len from the weather file fill the colum with random 0 to 1000 value
+                    self.simulation_df["Global Horizontal Radiation"] = self.rng.uniform(low=0, high=1000,
+                                                                                         size=len(self.simulation_df)
+                                                                                         )
+                else:  # use the
                     logger.commandline('PV conf detected setting up PV generation using weather file')
 
                 ghi = self.simulation_df["Global Horizontal Radiation"].fillna(0)
@@ -217,7 +218,7 @@ class dwelling:
                     v2g_enabled=False,
                     seed=self.seed,
                     in_eff=in_eff,
-                    out_eff= out_eff
+                    out_eff=out_eff
                 )
             elif isinstance(self.EV, EVHandler):
                 logger.commandline("EV is a EVHandler")

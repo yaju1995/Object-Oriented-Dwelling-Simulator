@@ -11,7 +11,7 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   demand_config,
                                                   battery_config)
 from SRC.SIM.ControlSignalHandler import ControlSignal
-from SRC.Controller.HEMSControlLib import HEMSController
+from SRC.Controller.HEMSControlRL import HEMSController
 from SRC.Controller.EV_controller.evControlLib import ev_controller
 
 RESOLUTION = timedelta(minutes=1)  # 1 min resolution info

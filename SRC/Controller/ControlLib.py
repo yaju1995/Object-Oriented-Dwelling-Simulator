@@ -5,27 +5,31 @@ from typing import Optional
 from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent, DDPGConfig
 from SRC.support import CustomLogger
 from SRC.SIM.EquipmentClass import InverterModel, MeterModel, HVACModel, EVModel
-
+from SRC.Controller.Database.PandasDatabase import DataStore
 
 logger = CustomLogger(command=True, color='green')
 
 
-class ess_controller:
-    def __init__(self, resolution:timedelta, control_period:timedelta= timedelta(minutes=30),agent:DDPGAgent =None):
+class controller:
+    def __init__(self, resolution:timedelta,global_database:DataStore,
+                 update_period:timedelta= timedelta(minutes=30),
+                 look_ahead= 1):
         '''
 
         :param agent:
         :param resolution:
         :param control_period:
         '''
-        self.agent = agent
+
         self. resolution = resolution
-        self.control_period = control_period
+        self.update_period = update_period
         self.ess_controller_df = pd.DataFrame()
+        self.global_databased = global_database
+        self.look_ahead = look_ahead
 
         # if self.agent = None in this condition use Rule based
 
-    def update_status(self, meter_info:MeterModel, inverter_info:InverterModel):
+    def update_status(self, now_time: datetime):
         # Here I am get 1 min data need to convert that to
         # get state vs individual data
         # estimate load, pv, battery soc, tariffs
@@ -44,9 +48,16 @@ class ess_controller:
         HVAC, [5 min resolution ]
         ESS , [10 min resolution ] , minimum to support all the loads
         """
+        now_time = now_time
+        next_time = now_time + self.resolution
+        do_update = (next_time.minute % (self.update_period.total_seconds() // 60) == 0)
+        if do_update:
+            pass
         pass
 
-    def get_state(self, inverter_info: InverterModel, states_info = None):
+
+
+    def get_state(self,control_time: datetime):
         # based on the time we collect the state
         # 00.00.00 collect information instants wh with respect to control_period
         """

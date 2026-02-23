@@ -9,9 +9,10 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   demand_config,
                                                   battery_config)
 
-from SRC.Controller.Database import PandasDatabase
-from SRC.Controller.HEMSControlLib import HEMSController
-import matplotlib.pyplot as plt
+# from SRC.Controller.HEMSControlRL import HEMSController
+from SRC.Controller.HEMSControlRule import HEMSController
+
+
 RESOLUTION = timedelta(minutes=15)  # 1 min resolution info
 DURATION = timedelta(days=30)
 START_TIME = datetime(2018, 1, 1)
@@ -30,11 +31,11 @@ House = dwelling(name='Dwelling_1',
                  seed=1)
 
 # to enable step to get inverter, meter, Hvac, ev information separately
-# House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
-# House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # TOU tariff
-House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
-House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
+# House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
+# House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
 
 # add TOU tariff day night and peak tariff
 # Initialized House
@@ -46,7 +47,7 @@ Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter
                             ev_update_period=timedelta(minutes=15),
                             ess_update_period= timedelta(minutes=15),
                             havc_update_period=timedelta(minutes=15),
-                            mode='Test',controller='RL',
+                            mode='Test',
                             ev_config=ev_config,
                             ess_config=battery_config,
                             hvac_config=thermal_config)
@@ -92,18 +93,27 @@ end = time.time()
 # plt.savefig('initial_soc.png')  # Save as PNG, PDF, SVG, etc.
 # plt.show()
 print(f"Simulation took {end - start:.4f} seconds")
-# print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
-# print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
+print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
+print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
 ev_soc = ev_config.get("capacity Wh")
-# print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
-# print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
-# print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
-# print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
-# print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
-# print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost/Controller.ev_controller.total_ev_charging_energy}')
+print(f'UnSatisfied SOC Wh: {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
+print(f'Satisfied SOC Wh: {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
+print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
+print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
+print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
+print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost/Controller.ev_controller.total_ev_charging_energy}')
 
 print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
-# print('')
-Controller.hems_database.df.to_csv('./Results/controller_test-TOU.csv')
-House.simulation_df.to_csv('./Results/simulation_test-TOU.csv')
+# # print('')
+# Controller.hems_database.df.to_csv('./Results/controller_test-dynamic_ESS_15_EV_cost4.csv')
+# House.simulation_df.to_csv('./Results/simulation_test-dynamic_ESS_15_EV_cost4.csv')
+
+#
+# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_1000.csv')
+# House.simulation_df.to_csv('./Results/simulation_test-TOU.csv')
+
+
+# REF RULE
+Controller.hems_database.df.to_csv('./Results/controller_test-dynamic_REF.csv')
+House.simulation_df.to_csv('./Results/simulation_test-dynamic_REF.csv')
