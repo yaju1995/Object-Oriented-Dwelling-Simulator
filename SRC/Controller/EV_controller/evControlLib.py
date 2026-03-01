@@ -25,7 +25,8 @@ def safe_div(a, b):
 class ev_controller:
     def __init__(self, rl_agent: DDPGAgent, resolution: timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=30),
-                 global_database: DataStore = None, mode='Train', max_charging_power=7, look_ahead=1):
+                 global_database: DataStore = None, mode='Train', max_charging_power=7, look_ahead=1,
+                 enable_plotter = False):
         self.agent_name = rl_agent.name
         self.ev_status = 0
         self.global_database = global_database
@@ -83,13 +84,15 @@ class ev_controller:
         self.initial_soc_list = []
         self.final_soc_list = []
         self.duration_list = []
-        self.multiPlotter = LivePlotter4(['Cost per kWh', 'change SoC', 'Final SOC', 'Overall $/kwh'],
-                                         xlabels=['Episode', 'Episode', 'Episode', 'Episode'],
-                                         ylabels=['$/kWh', 'SoC/min', 'SOC%', '$/kwh'])
+        self.enable_plotter = enable_plotter
+        if self.enable_plotter:
+            self.multiPlotter = LivePlotter4(['Cost per kWh', 'change SoC', 'Final SOC', 'Overall $/kwh'],
+                                             xlabels=['Episode', 'Episode', 'Episode', 'Episode'],
+                                             ylabels=['$/kWh', 'SoC/min', 'SOC%', '$/kwh'])
         # self.plotter1 = LivePlotter('Cost per kWh', 'Episode', '$/kWh')
         # self.plotter2 = LivePlotter('change SoC', 'Episode', 'SoC/min')
         # self.plotter3 = LivePlotter('Final SOC', 'Episode', 'SOC')
-        self.enable_plotter = True
+
 
     def update_status(self, ev_info: EVModel):
 
@@ -276,7 +279,7 @@ class ev_controller:
 
             # Train agent
             # if update ready then only at the end of the session
-            if self.mode == 'Train':
+            if self.mode == 'Train': # updating every time
                 self.rl_agent.train()
 
         # Check is the charge is disconnected : if so the set action = 0

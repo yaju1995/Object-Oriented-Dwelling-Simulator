@@ -18,7 +18,7 @@ ev_config = {
 }
 
 thermal_config = {
-    'initial temperature C': 21,
+    'initial temperature C': 10,
     'tau': 30 * 3600,  # need to get reference for these values
     'W': 200,  # need to get reference for these values
     'n': 0.95  # need to get reference for these values

@@ -18,5 +18,5 @@ ESS_INPUT_DIM = 1 + ESS_LOOK_AHEAD*2  # try to match the observed state with del
 ESS_OUT_DIM = 1
 
 # agent = DPGAgent(ESS_INPUT_DIM, ESS_OUT_DIM, 1, gamma=0.9, seed=0)
-ESS_MODEL_DIR = f'Models/ESS/nstep_res_15_{ESS_LOOK_AHEAD}_diff_tariff_up_4/'
+ESS_MODEL_DIR = f'Models/ESS/test_nstep_res_15_{ESS_LOOK_AHEAD}_diff_tariff_up_4/'
 ESS_MODEL_NAME = f'states_{ESS_INPUT_DIM}_delay_{ESS_LOOK_AHEAD}_1000eps.pth'

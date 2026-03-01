@@ -29,7 +29,8 @@ class essController:
                  max_charging_kw=0,
                  max_discharging_kw=0,
                  look_ahead=1,
-                 energy_normalizer=1):
+                 energy_normalizer=1,
+                 enable_plotter = False):
         '''
 
         :param rl_agent:
@@ -76,15 +77,16 @@ class essController:
         #############################################################
         self.energy_normalizer = energy_normalizer
         ############################################################
-        self.enable_plotter = True
+        self.enable_plotter = enable_plotter
         # self.live_plotter = LivePlotter(title='Reward',
         #                                xlabel='episode',
         #                                ylabel='reward')
         self.no_sim = 0
         self.sum_reward = 0
-        self.live_plotter = LivePlotter4(titles=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss', ],
-                                         xlabels=['Eps', 'Eps', 'Eps', 'Eps'],
-                                         ylabels=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss'])
+        if enable_plotter:
+            self.live_plotter = LivePlotter4(titles=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss', ],
+                                             xlabels=['Eps', 'Eps', 'Eps', 'Eps'],
+                                             ylabels=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss'])
 
     def __str__(self):
         return (

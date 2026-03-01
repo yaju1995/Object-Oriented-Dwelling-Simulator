@@ -14,9 +14,9 @@ from SRC.Controller.Database import PandasDatabase
 from SRC.Controller.HEMSControlRL import HEMSController
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 import matplotlib.pyplot as plt
-RES = 60
+RES = 15
 RESOLUTION = timedelta(minutes=RES)  # 1 min resolution info
-DURATION = timedelta(days=1000)
+DURATION = timedelta(days=500)
 START_TIME = datetime(2018, 1, 1)
 
 # demand_config = {
@@ -90,6 +90,11 @@ while current_time <= end_time:
     # get state (t+1)
     #
     control_signal = Controller.update(ev_info=ev, inverter_info=inverter, hvac_info=hvac, meter_info=meter)
+    # Update control parameter like, temperature, EV cost saving and so on
+    # Controller.hvac_controller.temp_ref = 22.5
+    # Controller.hvac_controller.temp_deviation = 2
+
+
     if control_signal:
         # print(control_signal)
         pass
@@ -104,16 +109,23 @@ while current_time <= end_time:
         print(f'{current_time.time()}: Mid night update tariff')
         House.tariff.updated_tariff()
         # update the SOC external for training
-        next_soc = House.Battery.set_soc(random.uniform(0.05, 1)) # reset that will occure
+        next_soc = House.Battery.set_soc(random.uniform(0.05, 1)) # reset that will occur
         day +=1
         print(f'{current_time}: day')
+        # updating the temp ref point
+        Controller.hvac_controller.temp_ref = random.randrange(15, 26) # ref is set
+        # may be change the bound but let see first.
+
+
+
     # if 24 hrs update tariff like in real case scenario
     # when and how will the tariff be updated
     # and if there is gap then how will the tariff be handled
-    if day in (30,50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950, 1000, 1250, 1500, 1750, 2000):
+    # if day in (30,50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950, 1000, 1250, 1500, 1750, 2000):
+    if day in (300,350,400,450,500):
         Controller.save_models(day)
 # Save the models
-
+# Controller.save_models(day)
 
 end = datetime.now()
 duration = (end - start).total_seconds()
@@ -144,5 +156,5 @@ print(f"Simulation took {duration:.4f} seconds")
 # print('')
 print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
-Controller.hems_database.df.to_csv('./Results/controller_train_4.csv')
-House.simulation_df.to_csv('./Results/simulation_train_4.csv')
+Controller.hems_database.df.to_csv('./Results/controller_train_change_ref.csv')
+House.simulation_df.to_csv('./Results/simulation_train_change_ref.csv')

@@ -58,4 +58,4 @@ class ThermalHandler:
             + (1.0 - self.E) * T_eq
         )
 
-        return self.internal_temperature
+        return round(self.internal_temperature,2)

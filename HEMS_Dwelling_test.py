@@ -9,8 +9,8 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   demand_config,
                                                   battery_config)
 
-# from SRC.Controller.HEMSControlRL import HEMSController
-from SRC.Controller.HEMSControlRule import HEMSController
+from SRC.Controller.HEMSControlRL import HEMSController
+# from SRC.Controller.HEMSControlRule import HEMSController
 
 
 RESOLUTION = timedelta(minutes=15)  # 1 min resolution info
@@ -64,7 +64,8 @@ start = time.time()
 ## Save the models - Properly name them
 # Test the models - test them
 # load the model before running
-Controller.load_models()
+TEST_EPS = 500
+Controller.load_models(episode=TEST_EPS)
 
 # Running a training loop
 while current_time <= end_time:
@@ -92,28 +93,28 @@ end = time.time()
 # plt.title('Initial SOC Distribution')
 # plt.savefig('initial_soc.png')  # Save as PNG, PDF, SVG, etc.
 # plt.show()
-print(f"Simulation took {end - start:.4f} seconds")
-print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
-print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
-ev_soc = ev_config.get("capacity Wh")
-print(f'UnSatisfied SOC Wh: {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
-print(f'Satisfied SOC Wh: {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
-print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
-print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
-print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
-print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost/Controller.ev_controller.total_ev_charging_energy}')
-
-print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
+# print(f"Simulation took {end - start:.4f} seconds")
+# print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
+# print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
+# ev_soc = ev_config.get("capacity Wh")
+# print(f'UnSatisfied SOC Wh: {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
+# print(f'Satisfied SOC Wh: {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
+# print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
+# print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
+# print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
+# print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost/Controller.ev_controller.total_ev_charging_energy}')
+#
+# print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
 # # print('')
 # Controller.hems_database.df.to_csv('./Results/controller_test-dynamic_ESS_15_EV_cost4.csv')
 # House.simulation_df.to_csv('./Results/simulation_test-dynamic_ESS_15_EV_cost4.csv')
 
 #
-# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_1000.csv')
-# House.simulation_df.to_csv('./Results/simulation_test-TOU.csv')
+# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_{TEST_EPS}_bound_2_change_t_ref_2.csv.csv')
+# House.simulation_df.to_csv(f'./Results/simulation_test-TOU_{TEST_EPS}_bound_2_change_t_ref_2.csv.csv')
 
 
 # REF RULE
-Controller.hems_database.df.to_csv('./Results/controller_test-dynamic_REF.csv')
-House.simulation_df.to_csv('./Results/simulation_test-dynamic_REF.csv')
+Controller.hems_database.df.to_csv(f'./Results/controller_test-dynamic_{TEST_EPS}_bound_2_change_t_ref_2.csv')
+House.simulation_df.to_csv(f'./Results/simulation_test-dynamic_{TEST_EPS}bound_2_change_t_ref_2.csv')
