@@ -104,7 +104,7 @@ class DQNConfig:
     # epsilon-greedy
     eps_start: float = 1.0
     eps_end: float = 0.05
-    eps_decay_steps: int = 200_000  # linear decay over these many action selections
+    eps_decay_steps: int = 20_000  # linear decay over these many action selections
 
     # target network update
     target_update_every: int = 1000  # steps

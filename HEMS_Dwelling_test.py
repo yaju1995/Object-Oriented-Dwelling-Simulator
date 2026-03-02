@@ -1,6 +1,7 @@
 import time
 import pandas as pd
-from datetime import datetime, timedelta
+import random
+from datetime import datetime, timedelta, time
 from SRC.SIM.Simulator import dwelling
 from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   ev_config,
@@ -9,8 +10,8 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   demand_config,
                                                   battery_config)
 
-from SRC.Controller.HEMSControlRL import HEMSController
-# from SRC.Controller.HEMSControlRule import HEMSController
+# from SRC.Controller.HEMSControlRL import HEMSController
+from SRC.Controller.HEMSControlRule import HEMSController
 
 
 RESOLUTION = timedelta(minutes=15)  # 1 min resolution info
@@ -31,11 +32,11 @@ House = dwelling(name='Dwelling_1',
                  seed=1)
 
 # to enable step to get inverter, meter, Hvac, ev information separately
-House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
-House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+# House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+# House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # TOU tariff
-# House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
-# House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
+House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
+House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
 
 # add TOU tariff day night and peak tariff
 # Initialized House
@@ -58,15 +59,17 @@ current_time = START_TIME
 end_time = START_TIME + DURATION
 control_signal = {}
 
-start = time.time()
+start = datetime.now()
 
 ### Train the moodels - 300 days
 ## Save the models - Properly name them
 # Test the models - test them
 # load the model before running
-TEST_EPS = 500
-Controller.load_models(episode=TEST_EPS)
-
+SEED = 0
+TEST_EPS = 300
+# Controller.load_models(episode=TEST_EPS)
+random.seed(SEED)
+day = 0
 # Running a training loop
 while current_time <= end_time:
     inverter, meter, ev, hvac, status = House.step(control_signal)
@@ -75,11 +78,13 @@ while current_time <= end_time:
     if control_signal:
         # print(control_signal)
         pass
+    # if current_time.time() == time(0, 0):
+    #     Controller.hvac_controller.temp_ref = random.randrange(15, 26)  # ref is set
 
     # Updating time
     current_time += RESOLUTION
 
-end = time.time()
+end = datetime.now()
 # plt.figure(1)
 # plt.savefig('Cost per kwh.png')  # Save as PNG, PDF, SVG, etc.
 # plt.show()
@@ -107,14 +112,14 @@ end = time.time()
 # print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
 # # print('')
-# Controller.hems_database.df.to_csv('./Results/controller_test-dynamic_ESS_15_EV_cost4.csv')
-# House.simulation_df.to_csv('./Results/simulation_test-dynamic_ESS_15_EV_cost4.csv')
+Controller.hems_database.df.to_csv('./Results/controller_test-TOU_ref.csv')
+House.simulation_df.to_csv('./Results/simulation_test-TOU_ref.csv')
 
 #
-# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_{TEST_EPS}_bound_2_change_t_ref_2.csv.csv')
-# House.simulation_df.to_csv(f'./Results/simulation_test-TOU_{TEST_EPS}_bound_2_change_t_ref_2.csv.csv')
+# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_{TEST_EPS}_bound_2_change_t_ref_3.csv')
+# House.simulation_df.to_csv(f'./Results/simulation_test-TOU_{TEST_EPS}_bound_2_change_t_ref_3.csv')
 
 
 # REF RULE
-Controller.hems_database.df.to_csv(f'./Results/controller_test-dynamic_{TEST_EPS}_bound_2_change_t_ref_2.csv')
-House.simulation_df.to_csv(f'./Results/simulation_test-dynamic_{TEST_EPS}bound_2_change_t_ref_2.csv')
+# Controller.hems_database.df.to_csv(f'./Results/controller_test-dynamic_{TEST_EPS}_bound_2_change_t_ref_3.csv')
+# House.simulation_df.to_csv(f'./Results/simulation_test-dynamic_{TEST_EPS}bound_2_change_t_ref_3.csv')

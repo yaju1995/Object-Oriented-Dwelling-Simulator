@@ -19,15 +19,15 @@ from torch import nn
 # DQN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 from SRC.Controller.DQNmodel.DQN_Agent import DQNConfig
 HVAC_DQN_config  = DQNConfig()
-HVAC_DQN_config.gamma = 0.9
+HVAC_DQN_config.gamma = 0.95
 HVAC_DQN_config.lr = 1e-4
-HVAC_DQN_config.hidden = (256,128)
+HVAC_DQN_config.hidden = (256,256)
 HVAC_DQN_config.seed = 0
 HVAC_DQN_config.batch_size = 500
 HVAC_LOOK_AHEAD = 1
-HVAC_INPUT_DIM = 3 + HVAC_LOOK_AHEAD*2
+HVAC_INPUT_DIM = 2 + HVAC_LOOK_AHEAD*2
 HVAC_OUT_DIM = 2
-HVAC_MODEL_DIR = f'Models/HVAC/test_n_step_{HVAC_LOOK_AHEAD}_bound_2_change_ref_2/'
+HVAC_MODEL_DIR = f'Models/HVAC/test_n_step_{HVAC_LOOK_AHEAD}_bound_2_change_ref_setup3_eps'
 HVAC_MODEL_NAME = f'DQN_states_{HVAC_INPUT_DIM}_config1_delay_{HVAC_LOOK_AHEAD}.pth'
 
 action_map = {

@@ -121,7 +121,7 @@ class hvacController(controller):
                             self.live_plotter.update([self.cumulative_reward,
                                                       avg_reward,
                                                       loss,
-                                                      reward,
+                                                      eps,
                                                       ])
 
                     self.cumulative_reward = 0
@@ -180,7 +180,7 @@ class hvacController(controller):
             temp_t_1 = value_t_1.get('Temperature - Indoor (C)')
 
         if temp_t and temp_t_1:
-            diff = temp_t - temp_t_1
+            diff = (temp_t - temp_t_1)/self.temp_deviation
             rate = diff / res_mins
         else:
             rate = 0
@@ -211,7 +211,7 @@ class hvacController(controller):
         tariff = np.round((tariff_states - tariff_min) / (tariff_max - tariff_min), 3)  # Normalized over max and min
         feed_tariff = np.round((feed_tariff_states - tariff_min) / (tariff_max - tariff_min), 3)
 
-        state = np.array([rate, t_in_norm, t_dev_norm, *tariff, *feed_tariff], dtype=float)
+        state = np.array([rate, t_in_norm, *tariff, *feed_tariff], dtype=float)
 
         return state
 
