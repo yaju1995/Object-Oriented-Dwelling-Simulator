@@ -122,7 +122,7 @@ while current_time <= end_time:
     # when and how will the tariff be updated
     # and if there is gap then how will the tariff be handled
     # if day in (30,50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950, 1000, 1250, 1500, 1750, 2000):
-    if day in (300,350,400,450,500):
+    if day in (300,350,400,450,500,550,600):
         Controller.save_models(day)
 # Save the models
 # Controller.save_models(day)

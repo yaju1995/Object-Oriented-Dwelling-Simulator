@@ -42,7 +42,6 @@ from .ESS_controller.ESS_RL_CONFIG import (ESS_DDPG_config, ESS_LOOK_AHEAD,
                                            ESS_MODEL_NAME,ESS_MODEL_DIR)
 from SRC.Controller.ESS_controller.essRLControlLib import essController
 ESS_RL_AGENT = Bound_DDPGAgent(name='ESSagent', obs_dim=ESS_INPUT_DIM, act_dim=ESS_OUT_DIM, cfg=ESS_DDPG_config,
-                               n_step=ESS_LOOK_AHEAD,
                                return_mode='nstep')
 # mode name from other
 # ESS_MODEL_DIR = f'Models/ESS/old_env/'
@@ -53,11 +52,9 @@ ESS_RL_AGENT = Bound_DDPGAgent(name='ESSagent', obs_dim=ESS_INPUT_DIM, act_dim=E
 # from SRC.Controller.HVAC_controller.hvacRuleControlLib import hvacController
 # RL agent
 from SRC.Controller.HVAC_controller.hvacRLControlLib import hvacController
-from .HVAC_controller.HVAC_RL_CONFIG import (HVAC_DQN_config, HVAC_LOOK_AHEAD,
-                                             HVAC_INPUT_DIM, HVAC_OUT_DIM,
-                                             HVAC_MODEL_NAME, HVAC_MODEL_DIR)
+from .HVAC_controller.HVAC_RL_CONFIG import HVAC_RL_AGENT,HVAC_INPUT_DIM,HVAC_LOOK_AHEAD,HVAC_MODEL_DIR
 
-HVAC_RL_AGENT = DQNAgent(name='HVACagent', obs_dim=HVAC_INPUT_DIM, n_actions=HVAC_OUT_DIM,cfg=HVAC_DQN_config)
+
 
 # Currently direct definition for early training and testing
 
@@ -144,10 +141,11 @@ class HEMSController:
                                               resolution=self.resolution,
                                               update_period=self.hvac_update_period,
                                               global_database=self.hems_database,
-                                              hvac_power_kw= 8,
-                                              energy_normalizer=8,
+                                              hvac_power_kw= self.hvac_config.get('heating_power')/1000,
+                                              energy_normalizer= self.hvac_config.get('heating_power')/1000,
                                               temp_ref=22.5,
                                               temp_deviation=2,
+                                              look_ahead = HVAC_LOOK_AHEAD,
                                               enable_plotter=True
                                               )
         # HVAC RULE based Controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -214,10 +212,10 @@ class HEMSController:
         self.hems_database.append(now_time, row)  # First update row then collect information
 
         # EV control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
+        self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
 
-        # if self.control_signals.EV_Max_Power is not None:
-        #     self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
+        if self.control_signals.EV_Max_Power is not None:
+            self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
 
         # HVAC control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(hvac_info=hvac_info)
@@ -225,10 +223,10 @@ class HEMSController:
             self.control_signals.HVAC_Heating_Power = float(self.control_signals.HVAC_Heating_Power)*1000
 
         # Battery control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
-        #                                                                             inverter_info=inverter_info)
-        # if self.control_signals.Battery_P_Setpoint is not None:
-        #     self.control_signals.Battery_P_Setpoint = float(self.control_signals.Battery_P_Setpoint) * 1000
+        self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
+                                                                                    inverter_info=inverter_info)
+        if self.control_signals.Battery_P_Setpoint is not None:
+            self.control_signals.Battery_P_Setpoint = float(self.control_signals.Battery_P_Setpoint) * 1000
 
         # generate controller signals ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         control_signal = self.control_signals.generate_control_signal()

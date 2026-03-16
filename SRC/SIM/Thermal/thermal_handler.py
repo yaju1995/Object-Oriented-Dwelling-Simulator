@@ -33,7 +33,9 @@ class ThermalHandler:
         self._update_E()
 
     # --------------------------------------------------
-    def _update_E(self):
+    def _update_E(self, tau= None):
+        if tau:
+            self.tau = tau
         dt = self.resolution.total_seconds()
         self.E = math.exp(-dt / self.tau)
 

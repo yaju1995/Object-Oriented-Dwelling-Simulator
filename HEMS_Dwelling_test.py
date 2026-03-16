@@ -10,14 +10,16 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   demand_config,
                                                   battery_config)
 
-# from SRC.Controller.HEMSControlRL import HEMSController
-from SRC.Controller.HEMSControlRule import HEMSController
+from SRC.Controller.HEMSControlRL import HEMSController
+
+# from SRC.Controller.HVAC_controller.HVAC_RL_CONFIG import  HVAC_MODEL_DIR
+# from SRC.Controller.HEMSControlRule import HEMSController
 
 
 RESOLUTION = timedelta(minutes=15)  # 1 min resolution info
 DURATION = timedelta(days=30)
 START_TIME = datetime(2018, 1, 1)
-
+TARIFF_TYPE = 'TOU'
 
 House = dwelling(name='Dwelling_1',
                  start_time=START_TIME,
@@ -32,27 +34,28 @@ House = dwelling(name='Dwelling_1',
                  seed=1)
 
 # to enable step to get inverter, meter, Hvac, ev information separately
-# House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
-# House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+if TARIFF_TYPE == 'TOU':
+    House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
+    House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
+else:
+    House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
+    House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example.csv')
 # TOU tariff
-House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
-House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU.csv')
+
 
 # add TOU tariff day night and peak tariff
 # Initialized House
 House.initialized_df()
 
-
 # # Defining controller
 Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter_tariff=House.tariff,
                             ev_update_period=timedelta(minutes=15),
-                            ess_update_period= timedelta(minutes=15),
+                            ess_update_period=timedelta(minutes=15),
                             havc_update_period=timedelta(minutes=15),
                             mode='Test',
                             ev_config=ev_config,
                             ess_config=battery_config,
                             hvac_config=thermal_config)
-
 
 #########################################################################
 current_time = START_TIME
@@ -66,8 +69,8 @@ start = datetime.now()
 # Test the models - test them
 # load the model before running
 SEED = 0
-TEST_EPS = 300
-# Controller.load_models(episode=TEST_EPS)
+TEST_EPS = 500
+Controller.load_models(episode=TEST_EPS)
 random.seed(SEED)
 day = 0
 # Running a training loop
@@ -78,8 +81,8 @@ while current_time <= end_time:
     if control_signal:
         # print(control_signal)
         pass
-    # if current_time.time() == time(0, 0):
-    #     Controller.hvac_controller.temp_ref = random.randrange(15, 26)  # ref is set
+    if current_time.time() == time(0, 0):
+        Controller.hvac_controller.temp_ref = random.randrange(15, 26)  # ref is set
 
     # Updating time
     current_time += RESOLUTION
@@ -112,14 +115,14 @@ end = datetime.now()
 # print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
 # # print('')
-Controller.hems_database.df.to_csv('./Results/controller_test-TOU_ref.csv')
-House.simulation_df.to_csv('./Results/simulation_test-TOU_ref.csv')
+# Controller.hems_database.df.to_csv('./Results/controller_test-Dynamic_ref_t_ref_change.csv')
+# House.simulation_df.to_csv('./Results/simulation_test-Dynamic_ref_t_ref_change.csv')
 
 #
-# Controller.hems_database.df.to_csv(f'./Results/controller_test-TOU_{TEST_EPS}_bound_2_change_t_ref_3.csv')
-# House.simulation_df.to_csv(f'./Results/simulation_test-TOU_{TEST_EPS}_bound_2_change_t_ref_3.csv')
 
 
-# REF RULE
-# Controller.hems_database.df.to_csv(f'./Results/controller_test-dynamic_{TEST_EPS}_bound_2_change_t_ref_3.csv')
-# House.simulation_df.to_csv(f'./Results/simulation_test-dynamic_{TEST_EPS}bound_2_change_t_ref_3.csv')
+# Controller.hems_database.df.to_csv(f'./Results/controller_HVAC-{TARIFF_TYPE}_{TEST_EPS}_constant.csv')
+# House.simulation_df.to_csv(f'./Results/simulation_HVAC-{TARIFF_TYPE}_{TEST_EPS}_constant.csv')
+
+Controller.hems_database.df.to_csv(f'./Results/controller_HVAC-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+House.simulation_df.to_csv(f'./Results/simulation_HVAC-{TARIFF_TYPE}_{TEST_EPS}_change.csv')

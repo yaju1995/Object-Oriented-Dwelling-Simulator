@@ -267,7 +267,7 @@ class essController:
         # print(value)
         logger.commandline(f'state:{control_time}:{soc},{tariff_states},->{tariff},{feed_tariff_states}->{feed_tariff}')
         # pass
-        return np.array([soc, *tariff, *feed_tariff], dtype=float)
+        return np.array([surplus, soc, *tariff, *feed_tariff], dtype=float)
 
     def compute_reward(self, control_time: datetime):  # replace control time wiht self time??
 

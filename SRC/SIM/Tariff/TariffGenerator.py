@@ -75,7 +75,7 @@ class RandomTariffGenerator(BaseTariffGenerator):
         # Use the generator's RNG (not global np.random)
         values = np.round(
             self.rng.uniform(self.low, self.high, size=len(idx)),
-            3
+            2
         )
 
         return pd.DataFrame({"value": values}, index=idx)

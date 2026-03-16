@@ -173,7 +173,7 @@ class DQNConfig:
     # epsilon-greedy
     eps_start: float = 1.0
     eps_end: float = 0.05
-    eps_decay_steps: int = 200_000
+    eps_decay_steps: int = 20_000
 
     # target update
     target_update_every: int = 1000  # steps
@@ -188,7 +188,8 @@ class DQNConfig:
 # DQN Agent (n-step)
 # ---------------------------
 class DQNAgent:
-    def __init__(self, obs_dim: int, n_actions: int, cfg: DQNConfig):
+    def __init__(self,name, obs_dim: int, n_actions: int, cfg: DQNConfig):
+        self.name = name
         self.cfg = cfg
         self.device = cfg.device
         self.gamma = float(cfg.gamma)

@@ -21,7 +21,9 @@ thermal_config = {
     'initial temperature C': 10,
     'tau': 30 * 3600,  # need to get reference for these values
     'W': 200,  # need to get reference for these values
-    'n': 0.95  # need to get reference for these values
+    'n': 0.95,  # need to get reference for these values
+    'heating_power': 8_000, # 8kw power
+    'efficiency':0
 }
 
 # model type with list

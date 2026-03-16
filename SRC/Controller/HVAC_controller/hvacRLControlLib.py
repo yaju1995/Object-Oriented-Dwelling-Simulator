@@ -6,7 +6,6 @@ from SRC.SIM.EquipmentClass import InverterModel, EVModel, MeterModel, HVACModel
 from SRC.SIM.EquipmentClass import InverterModel
 from SRC.support.lib_config import CustomLogger
 from SRC.support.live_plotter import LivePlotter, LivePlotter4
-# from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
 from SRC.Controller.DQNmodel.DQN_Agent import DQNAgent
 
 logger = CustomLogger(command=False, color='green')
@@ -15,7 +14,7 @@ logger = CustomLogger(command=False, color='green')
 # RL acon
 
 class hvacController(controller):
-    def __init__(self, resolution: timedelta, global_database, update_period,
+    def __init__(self, resolution: timedelta, global_database, update_period,look_ahead,
                  rl_agent: DQNAgent,
                  mode='Train', hvac_power_kw=8,
                  energy_normalizer=1,
@@ -24,7 +23,7 @@ class hvacController(controller):
                  temp_deviation=1,
                  hvac_type = 'heating',
                  enable_plotter = False):
-        super().__init__(resolution, global_database, update_period)
+        super().__init__(resolution, global_database, update_period, look_ahead)
         self.hvac_type = hvac_type
         self.set_HVAC_Power = None
         self.HVAC_ON = False
@@ -51,7 +50,7 @@ class hvacController(controller):
         self.no_sim = 0
         self.sum_reward = 0
         if self.enable_plotter:
-            self.live_plotter = LivePlotter4(titles=['Cum Reward', 'Avg Reward', 'Loss', 'Reward', ],
+            self.live_plotter = LivePlotter4(titles=['Cum Reward', 'Avg Reward', 'Loss', 'Epsilon', ],
                                              xlabels=['Eps', 'Eps', 'Eps', 'Eps'],
                                              ylabels=['Reward', 'Avg Reward', 'Loss', 'Eps'])
 
@@ -66,7 +65,8 @@ class hvacController(controller):
         next_time = now_time + self.resolution
         do_update = (next_time.minute % (self.update_period.total_seconds() // 60) == 0)
         if do_update:
-            self.control_logic(now_time, False)
+            # print(f'Update statue time {now_time}')
+            self.control_logic(next_time, False)
             if self.action is not None:
                 # mapping action to value
                 if self.action_map is not None:
@@ -80,6 +80,7 @@ class hvacController(controller):
         return self.set_HVAC_Power
 
     def control_logic(self, control_time: datetime, done):
+        # print(f'In control logic: {control_time}')
         if self.state is not None and self.action is not None:
             # Get reward
             reward = self.compute_reward(control_time)
@@ -109,7 +110,7 @@ class hvacController(controller):
 
                 # Update NN once a day
                 if control_time.time() in time_list:
-                    print(f'Updating Agent : {control_time}')
+                    # print(f'Updating Agent : {control_time}')
                     losses = self.rl_agent.train(batch_size=500)
                     if losses:
                         loss = losses.get('loss')
@@ -170,10 +171,12 @@ class hvacController(controller):
         '''
         temp_t = None
         temp_t_1 = None
-        value_t = self.global_databased.get_instant_state(now_time=control_time, keys=['Temperature - Indoor (C)'])
         control_time_1 = control_time - self.resolution
-        value_t_1 = self.global_databased.get_instant_state(now_time=control_time_1, keys=['Temperature - Indoor (C)'])
-
+        value_t = self.global_databased.get_instant_state(now_time=control_time_1, keys=['Temperature - Indoor (C)'])
+        control_time_2 = control_time_1 - self.resolution
+        value_t_1 = self.global_databased.get_instant_state(now_time=control_time_2, keys=['Temperature - Indoor (C)'])
+        # print(control_time_1,value_t)
+        # print(control_time_2,value_t_1)
         res_mins = int(self.resolution.total_seconds() // 60)
         temp_t = value_t.get('Temperature - Indoor (C)')
         if value_t_1 is not None:
@@ -181,7 +184,7 @@ class hvacController(controller):
 
         if temp_t and temp_t_1:
             diff = (temp_t - temp_t_1)/self.temp_deviation
-            rate = diff / res_mins
+            rate = diff/res_mins
         else:
             rate = 0
         # logger.commandline(value_t)
@@ -192,11 +195,13 @@ class hvacController(controller):
         t_dev_norm = self.temp_deviation / self.temp_ref
 
         # getting next tariff
-        tariff_time = control_time +self.resolution
+        tariff_time = control_time
         tariff_df = self.tariff_handler.get_tariff_range_df(tariff_time, period=self.look_ahead,
                                                             resolution=self.update_period)
         tariff_states = tariff_df['tariff'].tolist()
         feed_tariff_states = tariff_df['feed_tariff'].tolist()
+
+        # print(f'tariff : {control_time}: {tariff_states}, {feed_tariff_states}')
         tariff_states = np.array(tariff_states)
         im_tariff_max = self.tariff_handler.max_tariff
         im_tariff_min = self.tariff_handler.min_tariff
@@ -217,17 +222,21 @@ class hvacController(controller):
 
 
     def compute_reward(self, control_time: datetime):
-        value = self.global_databased.get_instant_state(now_time=control_time, keys=['Instant Cost',
+        # Reward for past data hence
+        reward_time = control_time- self.resolution
+        value = self.global_databased.get_instant_state(now_time=reward_time, keys=['Instant Cost',
                                                                                      'tariff',
                                                                                      'feed tariff',
                                                                                      'Heating Electric Power (kW)',
                                                                                      'Temperature - Indoor (C)'])
 
         tariff_states = value.get('tariff')
+
         im_tariff_max = self.tariff_handler.max_tariff
         im_tariff_min = self.tariff_handler.min_tariff
 
         feed_tariff_states = value.get('feed tariff')
+        # print(f'tariff : {reward_time}: {tariff_states}, {feed_tariff_states}')
         feed_tariff_max = self.tariff_handler.max_feed_tariff
         feed_tariff_min = self.tariff_handler.min_feed_tariff
 
@@ -243,16 +252,18 @@ class hvacController(controller):
         normalized_period_energy = hvac_period_power / self.energy_normalizer
 
         # Normalized reward
+
         r_cost = -(normalized_period_energy * normalized_tariff)
         ########################################################################
         # thermal reward
         t_in = value.get('Temperature - Indoor (C)')
         t_up_limit = self.temp_ref + self.temp_deviation
         t_down_limit = self.temp_ref - self.temp_deviation
-        # if t_up_limit <= t_in <=t_down_limit:
-        r_thermal = 1 - ((t_in - self.temp_ref) / self.temp_deviation) ** 2
-        # else:
-        #     r_thermal = -5
+        if t_down_limit<=t_in<=t_up_limit:
+            r_thermal = 1
+        else:
+            r_thermal = -5
+        # r_thermal = 1 - ((t_in - self.temp_ref) / self.temp_deviation) ** 2
 
         logger.commandline(f'power reward: {hvac_period_power, tariff_states, normalized_tariff, r_cost}')
         logger.commandline(f'temp reward: {t_in, self.temp_ref, self.temp_deviation, r_thermal}')

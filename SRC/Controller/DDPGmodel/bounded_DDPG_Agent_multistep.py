@@ -241,6 +241,8 @@ class DDPGConfig:
     seed: Optional[int] = 0
     a_max: Optional[float] = 1.0
     a_min: Optional[float] = -1.0
+    n_step = 1
+
 
 
 # ---------------------------
@@ -254,7 +256,6 @@ class Bound_DDPGAgent:
             act_dim: int,
             cfg: DDPGConfig,
             return_mode: ReturnMode = "nstep",
-            n_step: int = 4
     ):
         self.name = name
         self.cfg = cfg
@@ -262,7 +263,7 @@ class Bound_DDPGAgent:
         self.gamma = cfg.gamma
         self.tau = cfg.tau
         self.batch_size = cfg.batch_size
-        self.n_step = n_step
+        self.n_step = cfg.n_step
 
         self.rng = np.random.default_rng(cfg.seed)
         # seeds
