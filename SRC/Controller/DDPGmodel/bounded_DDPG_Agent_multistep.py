@@ -8,6 +8,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from SRC.support.lib_config import CustomLogger
+
+logger = CustomLogger(command=False, color='Magenta')
 
 # ---------------------------
 # Small MLP helper
@@ -131,6 +134,7 @@ class NStepAdder:
             gamma_pow *= self.gamma
 
         # gamma_pow is gamma^k, where k is number of rewards used
+        # print(s0, a0, R, s_last, done_last, gamma_pow)
         return s0, a0, R, s_last, done_last, gamma_pow
 
     def add(self, s, a, r, s2, done: bool):
@@ -288,7 +292,7 @@ class Bound_DDPGAgent:
 
         # replay + return collector
         self.buffer = ReplayBuffer(cfg.buffer_capacity, seed=cfg.seed)
-        self.collector = ReturnCollector(mode=return_mode, gamma=self.gamma, buffer=self.buffer, n_step=n_step)
+        self.collector = ReturnCollector(mode=return_mode, gamma=self.gamma, buffer=self.buffer, n_step=cfg.n_step)
 
         self.a_max = self.cfg.a_max
         self.a_min = self.cfg.a_min
@@ -304,7 +308,7 @@ class Bound_DDPGAgent:
 
     def default_bound_fn(self, state):
         # Always return static range (no state logic)
-        return np.array([-0.5]), np.array([0.5])
+        return np.array([-1]), np.array([1])
 
     def scale_action(self, raw_action, a_min, a_max):
         return a_min + 0.5 * (raw_action + 1.0) * (a_max - a_min)
@@ -317,12 +321,13 @@ class Bound_DDPGAgent:
         a_min, a_max = self.get_action_bounds(state, bound_fn)
 
         a = self.scale_action(ra, a_min, a_max)
-        # print(state, a_min, a_max, noise_std, ra, a)
+        logger.commandline(f'{a_min}, {a_max}, {noise_std}, {ra}, {a}')
         if noise_std > 0:
             a = a + self.rng.normal(0.0, noise_std, size=a.shape)
         return np.clip(a, a_min, a_max)
 
     def store_transition(self, state, action, reward: float, next_state, done: bool):
+        # print(reward)
         self.collector.add(state, action, reward, next_state, done)
 
     def train(self, batch_size: Optional[int] = None):
@@ -330,7 +335,7 @@ class Bound_DDPGAgent:
             batch_size = self.batch_size
         if len(self.buffer) < batch_size:
             return None
-        print(f'Updating!{len(self.buffer)} <{batch_size}')
+        # print(f'Updating!{len(self.buffer)} <{batch_size}')
         states, actions, R, next_states, dones, gamma_pows = self.buffer.sample(batch_size)
 
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
@@ -452,7 +457,16 @@ class Bound_DDPGAgent:
             return f"Model loaded successfully from: {path}"
 
         except Exception as e:
+            print(e)
             return f"Error loading model from {path}: {e}"
+        # print('ERROR')
+    def load_old(self, path):
+        checkpoint = torch.load(path,weights_only=False)
+        self.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic.load_state_dict(checkpoint['critic_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+        print(f"Agent loaded from {path}")
 
     def reset_return_builder(self):
         """Call at episode boundary if needed."""

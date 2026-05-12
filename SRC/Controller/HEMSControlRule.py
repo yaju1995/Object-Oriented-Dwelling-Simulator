@@ -17,7 +17,7 @@ logger = CustomLogger(command=True)
 
 # EV Import and Definition ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Rule based ~~~~~~~~~
-from SRC.Controller.EV_controller.evRuleControlLib import ev_controller
+from SRC.Controller.EV_controller.evRuleControlLib import evController
 
 # ESS Import and definition ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Rule based controller ~~~~~~~~~~~~~~~~
@@ -69,7 +69,7 @@ class HEMSController:
         self.ess_config = ess_config
         self.hvac_config = hvac_config
         # Ev Rule controller
-        self.ev_controller = ev_controller(resolution=self.resolution,
+        self.ev_controller = evController(resolution=self.resolution,
                                            update_period=self.ev_update_period,
                                            global_database=self.hems_database, mode=mode,
                                            max_charging_power=ev_config.get('charging power W', 7_000) / 1000)
@@ -109,7 +109,10 @@ class HEMSController:
         minute = self.resolution.total_seconds() / 60
 
         # Cost of consumed power
-        instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
+        if meter_info.active_power > 0:
+            instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
+        else:
+            instant_cost = round(meter_info.active_power * hours * meter_info.feed_tariff, 4)
 
         # Storing information in HVAC
         row = {  # Base on Constants COLUMNS_KEYS
@@ -171,5 +174,5 @@ class HEMSController:
         logger.commandline('No model to save !!!')
 
 
-    def load_models(self):
+    def load_models(self,episode=None):
         logger.commandline('No model to Load')

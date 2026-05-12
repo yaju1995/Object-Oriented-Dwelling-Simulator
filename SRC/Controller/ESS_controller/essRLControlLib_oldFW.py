@@ -15,34 +15,6 @@ from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
 logger = CustomLogger(command=False, color='cyan')
 
 
-# def soc_charge_limit(state, resolution):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#     #get C rating 0.5 -> unde charging resolution will be 0.5*res/60
-#     # for 15 min it will be 0.5/4 -> 0.125 soc limit
-#     # update max min limit with C rating and battery state
-#     # 1-soc
-#     charge_limit = 0.5
-#     discharge_limit = 0.5
-#
-#     energy_limit = 0.5 * resolution / 60 # energy limit
-#     if (1-soc) < energy_limit:
-#         charge_limit = (1 - soc) *  60/resolution
-#
-#     if soc-0.05 < energy_limit:
-#         discharge_limit = (soc-0.05) * 60/ resolution
-#
-#     return np.array([-discharge_limit]), np.array([charge_limit])
-
-
-# def no_limit(state):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#
-#     charge_limit = min(0.5, 1 - soc)
-#     discharge_limit = min(0.5, soc - 0.05)
-#     return np.array([-0.5]), np.array([0.5])
-
 class essController:
     def __init__(self, rl_agent: Bound_DDPGAgent, mode='Train', resolution: timedelta = timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=15),
@@ -76,8 +48,10 @@ class essController:
         self.max_discharging_power = max_discharging_kw
         self.ESS_charge = False
         self.set_battery_power = 0
+
         #############################################################
         self.tariff_handler = None
+
         #############################################################
         self.total_ess_charging_cost = 0
         self.total_ess_charging_energy = 0
@@ -133,7 +107,7 @@ class essController:
         )
 
     def soc_charge_limit(self, state):
-        soc = state[0]
+        soc = state[1]
 
         dt = (self.resolution.total_seconds() / 60) / 60
         max_c_rate = 0.5
@@ -143,9 +117,6 @@ class essController:
 
         charge_limit = max(0.0, charge_limit)
         discharge_limit = max(0.0, discharge_limit)
-
-        # charge_limit = min(0.5, 1 - soc)
-        # discharge_limit = min(0.5, soc - 0.05)
 
         return np.array([-discharge_limit]), np.array([charge_limit])
 
@@ -215,9 +186,8 @@ class essController:
             # Save transition (terminal or non-terminal)
             # pass to deque for delay reward update, update reward then add to agent store
             self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, False)
-            # self.rl_agent.store_transition(self.state, self.action, reward, self.next_state)
 
-            logger.commandline(control_time, self.state, self.action, reward, self.next_state, False)
+            # logger.commandline(control_time, self.state, self.action, reward, self.next_state, False)
             # print(control_time, self.state, self.action, reward, self.next_state, False)
 
             # Train agent
@@ -319,7 +289,7 @@ class essController:
         logger.commandline(
             f'state:{control_time}:::{soc}, {surplus}, {tariff_states},->{tariff},{feed_tariff_states}->{feed_tariff}')
         # pass
-        return np.array([ soc,forecast_surplus, *tariff, *feed_tariff], dtype=float)
+        return np.array([forecast_surplus, soc, *tariff, *feed_tariff], dtype=float)
 
     def compute_reward(self, control_time: datetime):  # replace control time wiht self time??
 
@@ -369,7 +339,7 @@ class essController:
         error_Reward = 0
         # print(set_power, actual_power)
         if round(set_power, 3) != round(actual_power, 3):
-            print(f'Unbalance: { round(set_power, 3)}!={round(actual_power, 3)} ')
+            print(f'Unbalance: {set_power}!={actual_power} ')
             logger.commandline(f'{set_power}!={actual_power} ')
             error_Reward = -5
         # print(f'{period_power} {set_power}: Cost Reward: {cost} Error Reward {error_Reward} ')
@@ -383,5 +353,5 @@ class essController:
         return self.rl_agent.save(path)
 
     def load_model(self, path):
-        # logger.commandline(self.rl_agent.load_old(path))
-        return self.rl_agent.load(path)
+        logger.commandline(self.rl_agent.load_old(path))
+        # return self.rl_agent.load(path)

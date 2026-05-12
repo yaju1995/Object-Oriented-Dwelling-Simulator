@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime, time
 from torch import nn
 
 from SRC.SIM.Tariff.tariffHandler import tariffHandler
@@ -7,53 +7,31 @@ from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
 from SRC.Controller.Database.PandasDatabase import DataStore
 from .Constants import COLUMNS_KEYS
-# from SRC.SIM.Simulator_Config.config_list import (ev_config, battery_config)
-
-from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent, DDPGConfig
-from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
-from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
-from SRC.Controller.DQNmodel.DQN_Agent import DQNAgent
-
 
 from SRC.support.lib_config import CustomLogger
 import os
 
 logger = CustomLogger(command=True)
 
-# EV Import and Definition ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Rule based ~~~~~~~~~
-# from SRC.Controller.EV_controller.evRuleControlLib import ev_controller
-
 # RL based ~~~~~~~
-from SRC.Controller.EV_controller.evControlLib import ev_controller
-from .EV_controller.EV_RL_CONFIG import EV_DDPG_config, EV_LOOK_AHEAD, EV_INPUT_DIM, EV_OUT_DIM,EV_MODEL_DIR,EV_MODEL_NAME
+from SRC.Controller.EV_controller.evControlLib_General import evController
+from .EV_controller.EV_RL_CONFIG import (EV_RL_AGENT, EV_LOOK_AHEAD,
+                                         EV_INPUT_DIM, EV_OUT_DIM, EV_MODEL_DIR,
+                                         EV_MODEL_NAME)
 
-EV_RL_AGENT = DDPGAgent(name='EVagent', obs_dim=EV_INPUT_DIM, act_dim=EV_OUT_DIM, cfg=EV_DDPG_config,
-                        n_step=EV_LOOK_AHEAD,
-                        return_mode='nstep')
-
-
-# ESS Import and definition ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Rule based controller ~~~~~~~~~~~~~~~~
-# from SRC.Controller.ESS_controller.ESSRuleControlLib import essController
 # RL agent based controller ~~~~~~~~~~~~~~~~
-from .ESS_controller.ESS_RL_CONFIG import (ESS_DDPG_config, ESS_LOOK_AHEAD,
+from .ESS_controller.ESS_RL_CONFIG import (ESS_RL_AGENT, ESS_LOOK_AHEAD,
                                            ESS_INPUT_DIM, ESS_OUT_DIM,
-                                           ESS_MODEL_NAME,ESS_MODEL_DIR)
+                                           ESS_MODEL_NAME, ESS_MODEL_DIR)
 from SRC.Controller.ESS_controller.essRLControlLib import essController
-ESS_RL_AGENT = Bound_DDPGAgent(name='ESSagent', obs_dim=ESS_INPUT_DIM, act_dim=ESS_OUT_DIM, cfg=ESS_DDPG_config,
-                               return_mode='nstep')
-# mode name from other
-# ESS_MODEL_DIR = f'Models/ESS/old_env/'
-# ESS_MODEL_NAME = f'seed_1_1000_old_quarter_batch_250.pth'
+# from SRC.Controller.ESS_controller.essRLControlLib_oldFW import essController
+# from SRC.Controller.ESS_controller.essRLControlLib_DN import essController
 
-
-# HVAC Import and definition ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# from SRC.Controller.HVAC_controller.hvacRuleControlLib import hvacController
 # RL agent
 from SRC.Controller.HVAC_controller.hvacRLControlLib import hvacController
-from .HVAC_controller.HVAC_RL_CONFIG import HVAC_RL_AGENT,HVAC_INPUT_DIM,HVAC_LOOK_AHEAD,HVAC_MODEL_DIR
-
+from .HVAC_controller.HVAC_RL_CONFIG import (HVAC_RL_AGENT,
+                                             HVAC_INPUT_DIM, HVAC_LOOK_AHEAD,
+                                             HVAC_MODEL_DIR, HVAC_MODEL_NAME)
 
 
 # Currently direct definition for early training and testing
@@ -62,13 +40,13 @@ class HEMSController:
     def __init__(self, name: str,
                  data_resolution: timedelta,
                  meter_tariff: tariffHandler,
-                 ev_tariff: tariffHandler = None, # pass ESS, EV and hvac control config from the simulator
+                 ev_tariff: tariffHandler = None,  # pass ESS, EV and hvac control config from the simulator
                  ess_update_period: timedelta = timedelta(minutes=15),
-                 ess_config:dict= None,
+                 ess_config: dict = None,
                  ev_update_period: timedelta = timedelta(minutes=15),
-                 ev_config:dict= None,
+                 ev_config: dict = None,
                  havc_update_period: timedelta = timedelta(minutes=15),
-                 hvac_config:dict = None,
+                 hvac_config: dict = None,
                  mode='Train'):
         """
 
@@ -83,6 +61,7 @@ class HEMSController:
         self.ess_update_period = ess_update_period
         self.hvac_update_period = havc_update_period
         # self.mode = mode
+
         # Databased definition
         self.hems_database = DataStore(resolution=data_resolution)
         self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
@@ -95,66 +74,58 @@ class HEMSController:
         self.ess_config = ess_config
         self.hvac_config = hvac_config
         # EV RL controller
-        self.ev_controller = ev_controller(rl_agent=EV_RL_AGENT, resolution=self.resolution,
-                                           update_period=self.ev_update_period,
-                                           global_database=self.hems_database, mode=mode,
-                                           max_charging_power=ev_config.get('charging power W', 7_000) / 1000,
-                                           look_ahead=EV_LOOK_AHEAD,
-                                           enable_plotter = False)
-        # Ev Rule controller
-        # self.ev_controller = ev_controller(resolution=self.resolution,
-        #                                    update_period=self.ev_update_period,
-        #                                    global_database=self.hems_database, mode=mode,
-        #                                    max_charging_power=ev_config.get('charging power W', 7_000) / 1000,
-        #                                    look_ahead=1)
-
-        if self.ev_controller is not None:
+        if EV_RL_AGENT is not None:
+            self.ev_controller = evController(rl_agent=EV_RL_AGENT, resolution=self.resolution,
+                                              update_period=self.ev_update_period,
+                                              global_database=self.hems_database, mode=mode,
+                                              max_charging_power=ev_config.get('charging power W', 7_000) / 1000,
+                                              look_ahead=EV_LOOK_AHEAD,
+                                              enable_plotter=True)
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if ev_tariff is None:
                 self.ev_controller.tariff_handler = meter_tariff
             else:
                 self.ev_controller.tariff_handler = ev_tariff
         # ESS RL controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.ess_controller = essController(rl_agent=ESS_RL_AGENT,
-                                            mode=mode,
-                                            resolution=self.resolution,
-                                            update_period=self.ess_update_period,
-                                            global_database=self.hems_database,
-                                            max_charging_kw=self.ess_config.get('charging power W', 1000) / 1000,
-                                            max_discharging_kw=self.ess_config.get("discharging power W", 1000) / 1000,
-                                            look_ahead=ESS_LOOK_AHEAD,
-                                            energy_normalizer=self.ess_config.get('capacity Wh') / 1000,
-                                            enable_plotter = False)
-        # RULE based Controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # self.ess_controller = essController(resolution=self.resolution,
-        #                                     update_period=self.ess_update_period,
-        #                                     global_database=self.hems_database,
-        #                                     max_charging_kw=ess_config.get('charging power W', 1000) / 1000,
-        #                                     max_discharging_kw=ess_config.get("discharging power W", 1000) / 1000,
-        #                                     look_ahead=1,
-        #                                     )
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.ess_controller.tariff_handler = meter_tariff
+        if ESS_RL_AGENT is not None:
+            self.ess_controller = essController(rl_agent=ESS_RL_AGENT,
+                                                mode=mode,
+                                                resolution=self.resolution,
+                                                update_period=self.ess_update_period,
+                                                global_database=self.hems_database,
+                                                max_charging_kw=self.ess_config.get('charging power W', 1000) / 1000,
+                                                max_discharging_kw=self.ess_config.get("discharging power W",
+                                                                                       1000) / 1000,
+                                                look_ahead=ESS_LOOK_AHEAD,
+                                                energy_normalizer = self.ess_config.get('capacity Wh') / 1000,
+                                                enable_plotter=True,
+                                                trigger_time=[
+                                                    time(0, 0),
+                                                    # time(6, 0),
+                                                    # time(12, 0),
+                                                    # time(18, 0),
+                                                ])
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            self.ess_controller.tariff_handler = meter_tariff
 
-        # HVAC RL controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.hvac_controller = hvacController(rl_agent=HVAC_RL_AGENT,
-                                              mode=mode,
-                                              resolution=self.resolution,
-                                              update_period=self.hvac_update_period,
-                                              global_database=self.hems_database,
-                                              hvac_power_kw= self.hvac_config.get('heating_power')/1000,
-                                              energy_normalizer= self.hvac_config.get('heating_power')/1000,
-                                              temp_ref=22.5,
-                                              temp_deviation=2,
-                                              look_ahead = HVAC_LOOK_AHEAD,
-                                              enable_plotter=True
-                                              )
-        # HVAC RULE based Controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # self.hvac_controller = hvacController(resolution=self.resolution,
-        #                                       update_period= self.hvac_update_period,
-        #                                       global_database=self.hems_database,
-        #                                       )
-
-        self.hvac_controller.tariff_handler = meter_tariff
+        if HVAC_RL_AGENT is not None:
+            # HVAC RL controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            self.hvac_controller = hvacController(rl_agent=HVAC_RL_AGENT,
+                                                  mode=mode,
+                                                  resolution=self.resolution,
+                                                  update_period=self.hvac_update_period,
+                                                  global_database=self.hems_database,
+                                                  hvac_power_kw=self.hvac_config.get('HVAC electric power Wh',
+                                                                                     8_000) / 1000,
+                                                  energy_normalizer=self.hvac_config.get('HVAC electric power Wh',
+                                                                                         8_000) / 1000,
+                                                  temp_ref=22.5,
+                                                  temp_deviation=2,
+                                                  look_ahead=HVAC_LOOK_AHEAD,
+                                                  enable_plotter=False
+                                                  )
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            self.hvac_controller.tariff_handler = meter_tariff
 
         self.load_forecasting_model = None
         self.generation_forecasting_model = None
@@ -176,11 +147,23 @@ class HEMSController:
         minute = self.resolution.total_seconds() / 60
 
         # Cost of consumed power
-        instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
+        if meter_info.active_power>0:
+            instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
+        else:
+            instant_cost = round(meter_info.active_power * hours * meter_info.feed_tariff, 4)
+        # getting attribute from controller
+        user_exp_soc = 0
+        user_dc_set_time = datetime(1, 1, 1, 0, 0, 0)
+        if self.ev_controller is not None:
+            user_exp_soc = self.ev_controller.user_exp_soc,
+            user_dc_set_time = self.ev_controller.user_dc_set_time
+        temp_ref = 0
+        if self.hvac_controller is not None:
+            temp_ref = self.hvac_controller.temp_ref
 
         # Storing information in HVAC
         row = {  # Base on Constants COLUMNS_KEYS
-            'Consumption (kW)': consumption,
+            'Consumption (kW)': consumption,  #Demand only (Demand + EV+ HVAC)
             'Consumption (kWh)': consumption * hours,
             'Generation (kW)': inverter_info.pv_power,
             'Generation (kWh)': inverter_info.pv_power * hours,
@@ -202,33 +185,39 @@ class HEMSController:
             'EV Electric Power (kW)': ev_info.ev_power,
             'EV Electric Energy (kWh)': ev_info.ev_power * hours,
 
+            'User Expected SOC (-)': user_exp_soc,
+            'User Expected Plugout Time': user_dc_set_time,
+
             'Temperature - Indoor (C)': hvac_info.ti,
             'Heating Electric Power (kW)': hvac_info.hvac_power,
             'Heating Electric Energy (kWh)': hvac_info.hvac_power * hours,
-            'Temperature - Ref (C)': self.hvac_controller.temp_ref
+            'Temperature - Ref (C)': temp_ref
         }
 
         # Database test ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         self.hems_database.append(now_time, row)  # First update row then collect information
 
         # EV control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
+        if self.ev_controller:
+            self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
 
         if self.control_signals.EV_Max_Power is not None:
             self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
 
         # HVAC control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(hvac_info=hvac_info)
+        if self.hvac_controller:
+            self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(hvac_info=hvac_info)
         if self.control_signals.HVAC_Heating_Power is not None:
-            self.control_signals.HVAC_Heating_Power = float(self.control_signals.HVAC_Heating_Power)*1000
+            self.control_signals.HVAC_Heating_Power = float(self.control_signals.HVAC_Heating_Power) * 1000
 
-        # Battery control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
-                                                                                    inverter_info=inverter_info)
+        # # Battery control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if self.ess_controller:
+            self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
+                                                                                        inverter_info=inverter_info)
         if self.control_signals.Battery_P_Setpoint is not None:
             self.control_signals.Battery_P_Setpoint = float(self.control_signals.Battery_P_Setpoint) * 1000
 
-        # generate controller signals ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # # generate controller signals ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         control_signal = self.control_signals.generate_control_signal()
         # logger.commandline(control_signal)
         # return the generated signal
@@ -341,7 +330,6 @@ class HEMSController:
             EV_PATH = os.path.join(EV_MODEL_DIR, EV_MODEL_NAME)
             logger.commandline(self.ev_controller.rl_agent.save(EV_PATH))
 
-
         if self.ess_controller:
             os.makedirs(ESS_MODEL_DIR, exist_ok=True)
             ESS_PATH = os.path.join(ESS_MODEL_DIR, ESS_MODEL_NAME)
@@ -355,18 +343,33 @@ class HEMSController:
             logger.commandline(self.hvac_controller.rl_agent.save(HVAC_PATH))
 
     def load_models(self, episode=None):
-        if episode is not None:
-            EV_MODEL_NAME = f'states_{EV_INPUT_DIM}_delay_{EV_LOOK_AHEAD}_{episode}eps.pth'
-            ESS_MODEL_NAME = f'states_{ESS_INPUT_DIM}_delay_{ESS_LOOK_AHEAD}_{episode}eps.pth'
-            HVAC_MODEL_NAME = f'states_{HVAC_INPUT_DIM}_delay_{HVAC_LOOK_AHEAD}_{episode}eps.pth'
+        print('Loading Model!!')
+        # Default names (from config)
+        EV_name = EV_MODEL_NAME
+        ESS_name = ESS_MODEL_NAME
+        HVAC_name = HVAC_MODEL_NAME
 
+        # Override if episode-specific models are requested
+        if episode is not None:
+            EV_name = f"states_{EV_INPUT_DIM}_delay_{EV_LOOK_AHEAD}_{episode}eps.pth"
+            ESS_name = f"states_{ESS_INPUT_DIM}_delay_{ESS_LOOK_AHEAD}_{episode}eps.pth"
+            HVAC_name = f"states_{HVAC_INPUT_DIM}_delay_{HVAC_LOOK_AHEAD}_{episode}eps.pth"
+
+        # EV
         if self.ev_controller:
-            EV_PATH = os.path.join(EV_MODEL_DIR, EV_MODEL_NAME)
-            logger.commandline(self.ev_controller.rl_agent.load(EV_PATH))
+            logger.commandline("Load EV Controller")
+            EV_PATH = os.path.join(EV_MODEL_DIR, EV_name)
+            logger.commandline(self.ev_controller.load_model(EV_PATH))
+
+        # ESS
         if self.ess_controller:
-            ESS_PATH = os.path.join(ESS_MODEL_DIR, ESS_MODEL_NAME)
-            logger.commandline(self.ess_controller.rl_agent.load(ESS_PATH))
-            # logger.commandline(agent.load(ESS_PATH))
+            logger.commandline("Load ESS Controller")
+            ESS_PATH = os.path.join(ESS_MODEL_DIR, ESS_name)
+            logger.commandline(self.ess_controller.load_model(ESS_PATH))
+
+        # HVAC
         if self.hvac_controller:
-            HVAC_PATH = os.path.join(HVAC_MODEL_DIR, HVAC_MODEL_NAME)
-            logger.commandline((self.hvac_controller.rl_agent.load(HVAC_PATH)))
+            logger.commandline("Load HVAC Controller")
+            HVAC_PATH = os.path.join(HVAC_MODEL_DIR, HVAC_name)
+            logger.commandline(self.hvac_controller.rl_agent.load(HVAC_PATH))
+

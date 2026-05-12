@@ -26,11 +26,11 @@ class EVHandler(ESSHandler):
         total_capacity_Wh: float,
         charging_power_W: float,
         discharging_power_W: float,
-
+        upper_limit_soc_pct: float,
+        lower_limit_soc_pct: float,
         v2g_enabled: bool = False,
 
-        upper_limit_soc_pct: float = 100.0,
-        lower_limit_soc_pct: float = 0.0,
+
 
         in_eff: float = 1.0,
         out_eff: float = 1.0,
@@ -66,6 +66,9 @@ class EVHandler(ESSHandler):
         # runtime state
         self.active_session_idx: Optional[int] = None
         self.previous_plugged: bool = False
+
+        self.user_set_plugout = None
+        self.expected_soc = 100
 
     # ==================================================================
     # Validation
@@ -141,14 +144,17 @@ class EVHandler(ESSHandler):
         if plugged and not self.previous_plugged:
             row = self.ev_df.loc[session_idx]
             init_soc = float(row["initial_soc"])
+            self.user_set_plugout = row['plug_out_time']
+            self.expected_soc = 100
 
             logger.commandline(
                 f"[EV] Plug-in @ {timestamp} | "
                 f"SOC reset → {init_soc:.2f}% | "
-                f"day_id={row['day_id']} weekday={row['weekday']}"
+                f"day_id={row['day_id']} weekday={row['weekday']} |"
+                f"Plug-out @ {self.user_set_plugout}"
             )
 
-            self.set_soc(init_soc, normalized=False) # initalized soc
+            self.set_soc(init_soc, normalized=False, clip=False) # initalized soc
             self.active_session_idx = session_idx # set session to active
 
         # -------------------------------------------------
@@ -168,6 +174,7 @@ class EVHandler(ESSHandler):
         # -------------------------------------------------
         if not plugged:
             power_setpoint_W = 0.0
+            self.user_set_plugout = None
         else:
             if control_power_W is None:
                 power_setpoint_W = 0 # charge with 0 power
@@ -188,12 +195,14 @@ class EVHandler(ESSHandler):
         ev_power_kw = out["Battery Electric Power (kW)"]
         ev_set_power_kw = out["Battery Set Power (kW)"]
         ev_soc = out["Battery SOC (-)"] if plugged else 0.0
-        # print(control_power_W)
+
         return {
             "EV Electric Power (kW)": round(ev_power_kw, 6),
             "EV Set Power (kW)": round(ev_set_power_kw,6),
             "EV SOC (-)": round(ev_soc, 3),
             "EV Parked": int(plugged),
+            "User Plug Out Time": self.user_set_plugout,
+            "Expected SOC": self.expected_soc
         }
 
     # ==================================================================

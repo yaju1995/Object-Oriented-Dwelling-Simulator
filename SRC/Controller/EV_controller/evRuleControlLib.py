@@ -22,10 +22,12 @@ def safe_div(a, b):
     return a / b if b else 0.0
 
 
-class ev_controller:
+class evController:
     def __init__(self, resolution: timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=30),
                  global_database: DataStore = None, mode='Train', max_charging_power=7, look_ahead=1,enable_plotter = True):
+        self.user_exp_soc = None
+        self.user_dc_set_time = None
         self.ev_status = 0
         self.global_database = global_database
         self.mode = mode
@@ -217,7 +219,14 @@ class ev_controller:
     def control_logic(self, control_time: datetime, ev_info):  # ddpg logic
 
         if ev_info.ev_status:
-            self.set_charging_power = 7
+            self.set_charging_power = self.max_charging_power
         else:
             self.set_charging_power = 0
         return
+    
+    def update_user_dc_time(self, dc_time: datetime):
+        # Need to add noise to this
+        self.user_dc_set_time = dc_time
+
+    def update_user_exp_soc(self, soc: int):
+        self.user_exp_soc = soc / 100

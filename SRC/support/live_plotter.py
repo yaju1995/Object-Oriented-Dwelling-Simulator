@@ -43,7 +43,7 @@ class LivePlotter:
         plt.draw()
         plt.pause(0.01)
 
-
+import csv
 class LivePlotter4:
     def __init__(self, titles=None, xlabels=None, ylabels=None):
         # Defaults
@@ -117,6 +117,21 @@ class LivePlotter4:
 
         plt.draw()
         plt.pause(0.01)
+
+    def save_csv(self, prefix="plot"):
+        """
+        Save each subplot's data to separate CSV files:
+        prefix_0.csv, prefix_1.csv, prefix_2.csv, prefix_3.csv
+        """
+        for i in range(4):
+            filename = f"{prefix}_{i}.csv"
+            with open(filename, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["x", "y"])
+                for x, y in zip(self.x_data[i], self.y_data[i]):
+                    writer.writerow([x, y])
+            print(f"Saved {filename}")
+
 
 import numpy as np
 import time

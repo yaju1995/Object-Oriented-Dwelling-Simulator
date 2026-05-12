@@ -7,7 +7,7 @@ import pandas as pd
 
 from SRC.support import CustomLogger
 
-logger = CustomLogger(command=True)
+logger = CustomLogger(command=False)
 
 
 class ESSHandler:
@@ -69,7 +69,6 @@ class ESSHandler:
         self.rated_capacity_Wh = float(total_capacity_Wh)
         self.charging_power_W = float(charging_power_W)
         self.discharging_power_W = float(discharging_power_W)
-
         self.upper_limit_soc_pct = float(upper_limit_soc_pct)
         self.lower_limit_soc_pct = float(lower_limit_soc_pct)
 
@@ -149,11 +148,11 @@ class ESSHandler:
             self._apply_battery_energy(-self.self_discharge_Wh_step)
 
         # ---------- Clamp power ----------
+
         req_power_W = max(
             -self.discharging_power_W,
             min(self.charging_power_W, power_setpoint_W),
         )
-
         # ---------- Power → terminal energy ----------
         terminal_Wh = req_power_W * self.dt_hours
 
@@ -188,7 +187,7 @@ class ESSHandler:
             actual_power_W=actual_power_W,
             batt_Wh=batt_Wh,
         )
-
+        # kWh = round(actual_power_W / 1000.0, 6)
         # ---------- Return contract ----------
         return {
             'Battery SOC (-)': round(self.getStateOfCharge() / 100.0, 6),
@@ -198,9 +197,15 @@ class ESSHandler:
 
     # ------------------------------------------------------------------
     def _limit_by_soc(self, batt_Wh: float) -> float:
+
         if batt_Wh > 0:
+            # if self.avai_capacity_Wh>self.upper_limit_Wh:
+                # logger.commandline(f'Battery over charger to {self.getStateOfCharge()}%')
             return min(batt_Wh, self.upper_limit_Wh - self.avai_capacity_Wh)
         elif batt_Wh < 0:
+            if self.avai_capacity_Wh<self.lower_limit_Wh:
+                # logger.commandline(f'Battery below lower limit to {self.getStateOfCharge()}%')
+                return 0.0
             return max(batt_Wh, self.lower_limit_Wh - self.avai_capacity_Wh)
         return 0.0
 
@@ -300,9 +305,9 @@ class ESSHandler:
         if clip:
             soc_pct = max(min_soc, min(max_soc, soc_pct))
         else:
-            if not (min_soc <= soc_pct <= max_soc):
-                raise ValueError(
-                    f"SOC {soc_pct}% outside limits "
+            if not (0 <= soc_pct <=100):
+                raise Warning(
+                    f"SOC {soc_pct}% outside limits of 0 and 100"
                     f"[{min_soc}, {max_soc}]"
                 )
 

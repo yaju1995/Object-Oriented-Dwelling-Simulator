@@ -60,6 +60,8 @@ class InverterModel(BaseModel):
     pv_power: float= 0.0
     battery_power: float= 0.0
     battery_soc: float= 0.0
+    forecast_demand:float = 0.0
+    forecast_generation: float= 0.0
 
 
 class EVModel(BaseModel):
@@ -67,12 +69,15 @@ class EVModel(BaseModel):
     ev_status: bool= 0.0
     ev_soc: float= 0.0
     ev_power: float= 0.0
+    user_ev_dc_time:datetime | int | float = 0.0 # EV disconnect time
+    expected_soc:int = 100 # in percentage
 
 
 class HVACModel(BaseModel):
     time: datetime | int | float= 0.0
     ti: float= 0.0
     hvac_power: float= 0.0
+    temp_ref:int = 22.5
 
 
 if __name__ == '__main__':

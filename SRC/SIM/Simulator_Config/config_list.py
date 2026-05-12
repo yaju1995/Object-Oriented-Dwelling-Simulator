@@ -1,16 +1,18 @@
+BATTERY_CAPACITY_WH = 10000
+C_RATING = 0.5
 battery_config = {
-    "capacity Wh": 10_000,
-    "initial soc": 50,
-    "charging power W": 5000,
-    "discharging power W": 5000,
+    "capacity Wh": BATTERY_CAPACITY_WH,
+    "initial soc": 100,
+    "charging power W": BATTERY_CAPACITY_WH * C_RATING,
+    "discharging power W": BATTERY_CAPACITY_WH * C_RATING,
     "charging eff": 1,
     "discharging eff": 1,
 }
 
 ev_config = {
-    "capacity Wh": 60_000,  # 60 kWh
-    "charging power W": 7_000,  # 7 kW charger
-    "discharging power W": 0,  # V2G capable
+    "capacity Wh": 33_200,  # 60 kWh
+    "charging power W": 7_700,  # 7 kW charger
+    "discharging power W": 6_000,  # V2G capable
     "charging eff": 1,
     "discharging eff": 1,
     "v2g_enabled": False,

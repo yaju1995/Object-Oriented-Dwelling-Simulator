@@ -60,21 +60,29 @@ class essController:
             consumption = round(meter_info.active_power - inverter_info.battery_power + inverter_info.pv_power, 3)
             generation = round(inverter_info.pv_power, 3)
             surplus = generation - consumption
-            next_tariff, _ = self.tariff_handler.get_tariff(next_time)
-            if (inverter_info.battery_soc >= 0.05 and
-                    (surplus < 0 or
-                     self.tariff_handler.avg_tariff < next_tariff)):
-                # support load
-                self.set_battery_power = surplus
-            elif (inverter_info.battery_soc < 100 and
-                  (surplus > 0 or
-                   self.tariff_handler.avg_tariff > next_tariff)):
-                # charge battery with surplus
-                self.set_battery_power = surplus
-                if self.tariff_handler.avg_tariff < next_tariff:
-                    self.set_battery_power = self.max_charging_power
+            next_tariff, next_feed_tariff = self.tariff_handler.get_tariff(next_time)
+            ##############
+            # if (inverter_info.battery_soc >= 0.05 and
+            #         (surplus < 0 or
+            #          next_feed_tariff < next_tariff)):
+            #     # support load
+            #     self.set_battery_power = surplus
+            # elif (inverter_info.battery_soc < 100 and
+            #       (surplus > 0 or
+            #        next_feed_tariff > next_tariff)):
+            #     # charge battery with surplus
+            #     self.set_battery_power = surplus
+            #     if next_feed_tariff > next_tariff: # change feed to average price self.tariff_handler.avg_tariff
+            #         self.set_battery_power = self.max_charging_power
+            # else:
+            #     self.set_battery_power = 0
+            #################
+            if next_feed_tariff>next_tariff:
+                self.set_battery_power = self.max_charging_power
             else:
-                self.set_battery_power = 0
+                self.set_battery_power = surplus
+
+
 
 
         return self.set_battery_power

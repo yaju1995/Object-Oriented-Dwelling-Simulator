@@ -15,33 +15,6 @@ from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
 logger = CustomLogger(command=False, color='cyan')
 
 
-# def soc_charge_limit(state, resolution):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#     #get C rating 0.5 -> unde charging resolution will be 0.5*res/60
-#     # for 15 min it will be 0.5/4 -> 0.125 soc limit
-#     # update max min limit with C rating and battery state
-#     # 1-soc
-#     charge_limit = 0.5
-#     discharge_limit = 0.5
-#
-#     energy_limit = 0.5 * resolution / 60 # energy limit
-#     if (1-soc) < energy_limit:
-#         charge_limit = (1 - soc) *  60/resolution
-#
-#     if soc-0.05 < energy_limit:
-#         discharge_limit = (soc-0.05) * 60/ resolution
-#
-#     return np.array([-discharge_limit]), np.array([charge_limit])
-
-
-# def no_limit(state):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#
-#     charge_limit = min(0.5, 1 - soc)
-#     discharge_limit = min(0.5, soc - 0.05)
-#     return np.array([-0.5]), np.array([0.5])
 
 class essController:
     def __init__(self, rl_agent: Bound_DDPGAgent, mode='Train', resolution: timedelta = timedelta(minutes=1),
@@ -76,6 +49,7 @@ class essController:
         self.max_discharging_power = max_discharging_kw
         self.ESS_charge = False
         self.set_battery_power = 0
+
         #############################################################
         self.tariff_handler = None
         #############################################################
@@ -87,7 +61,7 @@ class essController:
         #############################################################
         self.rl_agent = rl_agent
         self.agent_name = rl_agent.name
-        self.rl_agent.bound_fn = self.soc_charge_limit
+        self.rl_agent.bound_fn = None
         self.state = None
         self.action = None
         self.reward = None
@@ -104,15 +78,14 @@ class essController:
         #                                ylabel='reward')
         self.no_sim = 0
         self.sum_reward = 0
-        self.avg_reward = 0
         if enable_plotter:
-            self.live_plotter = LivePlotter4(titles=['Cumulated Reward', 'Avg Reward', 'Critic loss', 'Actor loss', ],
+            self.live_plotter = LivePlotter4(titles=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss', ],
                                              xlabels=['Eps', 'Eps', 'Eps', 'Eps'],
                                              ylabels=['Reward', 'Avg Reward', 'Critic loss', 'Actor loss'])
 
         self.trigger_time = trigger_time
 
-        self.forecast_demands = None
+        self.forecast_demands= None
         self.forecast_generations = None
 
     def __str__(self):
@@ -143,9 +116,6 @@ class essController:
 
         charge_limit = max(0.0, charge_limit)
         discharge_limit = max(0.0, discharge_limit)
-
-        # charge_limit = min(0.5, 1 - soc)
-        # discharge_limit = min(0.5, soc - 0.05)
 
         return np.array([-discharge_limit]), np.array([charge_limit])
 
@@ -182,7 +152,7 @@ class essController:
         if do_update:  # every 15 or 30 mins update 60 mins
             self.control_logic(next_time, done)  # next time period is the control time period
             if self.action is not None:
-                self.set_battery_power = round(float(self.action) * self.energy_normalizer, 3)
+                self.set_battery_power = round(float(self.action) * self.max_charging_power, 3)
             else:
                 self.set_battery_power = self.action
             # states = self.get_state(now_time)
@@ -218,7 +188,6 @@ class essController:
             # self.rl_agent.store_transition(self.state, self.action, reward, self.next_state)
 
             logger.commandline(control_time, self.state, self.action, reward, self.next_state, False)
-            # print(control_time, self.state, self.action, reward, self.next_state, False)
 
             # Train agent
             # if update ready then only at the end of the session
@@ -233,17 +202,16 @@ class essController:
                     else:
                         critic = 0
                         actor = 0
-                    self.no_sim += 1
-                    self.sum_reward += self.cumulative_reward
-                    self.avg_reward = self.sum_reward / self.no_sim
-                    if self.enable_plotter:  # only plot after 24 hrs or something
 
+                    if self.enable_plotter:  # only plot after 24 hrs or something
+                        self.no_sim += 1
+                        self.sum_reward += self.cumulative_reward
+                        avg_reward = self.sum_reward / self.no_sim
                         self.live_plotter.update([self.cumulative_reward,
-                                                  self.avg_reward,
+                                                  avg_reward,
                                                   critic,
                                                   actor,
                                                   ])
-
                         # print(f'{self.cumulative_reward, avg_reward, critic, actor}')
                     self.cumulative_reward = 0
 
@@ -275,7 +243,7 @@ class essController:
             noise = 0.0
 
         # safe layer implemented
-        self.action = self.rl_agent.choose_action(self.state, noise_std=noise, bound_fn=self.soc_charge_limit)
+        self.action = self.rl_agent.choose_action(self.state, noise_std=noise, bound_fn=None)
 
         return
 
@@ -285,15 +253,13 @@ class essController:
                                                                                      'Generation (kW)'])
         # getting current time information
         # print(value)
-        consumption = value.get('Consumption (kW)')
+        consumption = value.get('Consumption (kW)')  # 11 kWH max data
         soc = value.get('Battery SOC (-)')
-        generation = value.get('Generation (kW)')
-
-        forecast_surplus = round((self.forecast_generations - self.forecast_demands) / self.energy_normalizer, 6)
-        surplus = round((generation - consumption)/self.energy_normalizer, 6)
-
-        # print(f'now {surplus}')
-        # print(f'forecast {forecast_surplus}')
+        generation = value.get('Generation (kW)') # 5kW solar max
+        # print(f'now {consumption}, {generation}')
+        # print(f'forecast {self.forecast_demands}, {self.forecast_generations}')
+        surplus = round((generation - consumption)/15, 6)
+        forecast_surplus = round((self.forecast_generations - self.forecast_demands)/15,6)
         # print(consumption, generation, self.energy_normalizer, surplus)
 
         # getting next tariff
@@ -309,9 +275,8 @@ class essController:
         exp_tariff_max = self.tariff_handler.max_feed_tariff
         exp_tariff_min = self.tariff_handler.min_feed_tariff
 
-        tariff_max = round(max(exp_tariff_max, im_tariff_max),2)
-        tariff_min = round(min(exp_tariff_min, im_tariff_min),2)
-        # print(tariff_max, tariff_min)
+        tariff_max = max(exp_tariff_max, im_tariff_max)
+        tariff_min = min(exp_tariff_min, im_tariff_min)
 
         tariff = np.round((tariff_states - tariff_min) / (tariff_max - tariff_min), 3)  # Normalized over max and min
         feed_tariff = np.round((feed_tariff_states - tariff_min) / (tariff_max - tariff_min), 3)
@@ -319,7 +284,7 @@ class essController:
         logger.commandline(
             f'state:{control_time}:::{soc}, {surplus}, {tariff_states},->{tariff},{feed_tariff_states}->{feed_tariff}')
         # pass
-        return np.array([ soc,forecast_surplus, *tariff, *feed_tariff], dtype=float)
+        return np.array([ soc, forecast_surplus, *tariff, *feed_tariff], dtype=float)
 
     def compute_reward(self, control_time: datetime):  # replace control time wiht self time??
 
@@ -354,14 +319,16 @@ class essController:
 
         # Normalized reward
         if period_power >= 0:  # importing
-            cost = -round(normalized_period_energy * normalized_tariff, 6)
+            normalized_cost = -round(normalized_period_energy * normalized_tariff, 6)
+            period_cost =  -round(period_energy * tariff_states, 6)
         else:  # exporting
-            cost = -round(normalized_period_energy * normalized_feed_tariff, 6)
+            normalized_cost = -round(normalized_period_energy * normalized_feed_tariff, 6)
+            period_cost = -round(period_energy * feed_tariff_states, 6)
         # cost = value.get('Instant Cost')
         logger.commandline(f'reward:{control_time}:\n'
                            f'{tariff_states}->{normalized_tariff}\n'
                            f'{feed_tariff_states}->{normalized_feed_tariff}\n'
-                           f'{period_power},{normalized_period_energy},{cost}')
+                           f'{period_power},{normalized_period_energy},{normalized_cost}')
         # pass
         # check error is action does not match the reward
         set_power = value.get('Battery Set Power (W)') / 1000
@@ -369,19 +336,21 @@ class essController:
         error_Reward = 0
         # print(set_power, actual_power)
         if round(set_power, 3) != round(actual_power, 3):
-            print(f'Unbalance: { round(set_power, 3)}!={round(actual_power, 3)} ')
+            print(f'Unbalance: {set_power}!={actual_power} ')
             logger.commandline(f'{set_power}!={actual_power} ')
-            error_Reward = -5
-        # print(f'{period_power} {set_power}: Cost Reward: {cost} Error Reward {error_Reward} ')
-        reward = cost + error_Reward
+            error_Reward = -2
+            # error_Reward = - abs(set_power-actual_power)/(self.energy_normalizer/2)
+
+        reward = normalized_cost + error_Reward
+        # print(f'{period_power} {set_power} Reward :{reward} Cost Reward: {normalized_cost} Error Reward {error_Reward} ')
 
         # pass
         return reward
 
     def save_model(self, path):
         # Ensure the directory exists
-        return self.rl_agent.save(path)
+        return (self.rl_agent.save(path))
 
     def load_model(self, path):
         # logger.commandline(self.rl_agent.load_old(path))
-        return self.rl_agent.load(path)
+        return (self.rl_agent.load(path))

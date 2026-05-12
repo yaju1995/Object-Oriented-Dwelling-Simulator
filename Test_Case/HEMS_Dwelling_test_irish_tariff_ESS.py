@@ -9,11 +9,9 @@ from SRC.SIM.Simulator_Config.config_list import (pv_config,
                                                   weather_file,
                                                   demand_config,
                                                   battery_config)
-# ~~~~~~~~~~ Switch Controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 from SRC.Controller.HEMSControlRL import HEMSController
 # from SRC.Controller.HEMSControlRule import HEMSController
-
-
 from SRC.SIM.ControlSignalHandler import ControlSignal
 
 # from SRC.Controller.HVAC_controller.HVAC_RL_CONFIG import  HVAC_MODEL_DIR
@@ -21,10 +19,10 @@ from SRC.SIM.ControlSignalHandler import ControlSignal
 
 
 RESOLUTION = timedelta(minutes=60)  # 1 min resolution info
-DURATION = timedelta(days=30)
-START_TIME = datetime(2020, 1, 1)
+DURATION = timedelta(hours=8683)
+# DURATION = timedelta(hours=48)
+START_TIME = datetime(2020, 1, 1,0,0)
 TARIFF_TYPE = 'TOU'
-
 
 House = dwelling(name='Dwelling_1',
                  start_time=START_TIME,
@@ -38,32 +36,34 @@ House = dwelling(name='Dwelling_1',
                  thermal_config=None,
                  seed=1)
 
-
 # to enable step to get inverter, meter, Hvac, ev information separately
 if TARIFF_TYPE == 'TOU':
-    House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
-    House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU_0_2.csv')
+    House.tariff.upload_tariff('../SRC/SIM/Defaults/Tariff/hourly_tariff_example-TOU.csv')
+    House.tariff.upload_feed_tariff('../SRC/SIM/Defaults/Tariff/hourly_feed_tariff_example-TOU_0_2.csv')
+elif TARIFF_TYPE == 'Irish':
+    House.tariff.upload_historic_tariff('../SRC/SIM/Defaults/Tariff/Irish_2020/Irish_2020_Wholesale_tariff_price.csv')
+    House.tariff.upload_historic_feed_tariff('../SRC/SIM/Defaults/Tariff/Irish_2020/Irish_2020_Wholesale_feed_price.csv')
+    House.tariff.prepare_day_ahead_tariffs(START_TIME)
+elif TARIFF_TYPE == 'Dynamic_old_fw':
+    House.tariff.upload_historic_tariff('../SRC/SIM/Defaults/Tariff/Irish_2020/Irish_2020_Wholesale_tariff_price.csv')
+    House.tariff.upload_historic_feed_tariff(
+        '../SRC/SIM/Defaults/Tariff/Irish_2020/Irish_2020_Wholesale_feed_price.csv')
+    House.tariff.prepare_day_ahead_tariffs(START_TIME)
 else:
-
-    House.tariff.upload_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-Dynamic.csv')
-    House.tariff.upload_feed_tariff('./SRC/SIM/Defaults/Tariff/hourly_tariff_example-Dynamic.csv')
+    House.tariff.upload_tariff('../SRC/SIM/Defaults/Tariff/hourly_tariff_example-Dynamic.csv')
+    House.tariff.upload_feed_tariff('../SRC/SIM/Defaults/Tariff/hourly_tariff_example-Dynamic.csv')
 
 # TOU tariff
-House.tariff.updated_tariff()
 
 # add TOU tariff day night and peak tariff
 # Initialized House
 House.initialized_df()
 
+
 # Upload House demand and generation
-House.upload_data('Results/Test_Data/house2_consumption_dwell.csv',
+House.upload_data('../Results/Test_Data/house2_consumption_dwell.csv',
                   columns= ["Demand Electric Power (kW)", "PV Electric Power (kW)"])
-# print(df)
-# House.simulation_df.to_csv(f'./Results/simulation.csv')
-
-# Extracting EV profile
-# House.EV.ev_df.to_csv(f'./Results/ev_profile.csv')
-
+# House.simulation_df.to_csv('test.csv')
 # # Defining controller
 Controller = HEMSController(name='Dwelling_1', data_resolution=RESOLUTION, meter_tariff=House.tariff,
                             ev_update_period=RESOLUTION,
@@ -87,8 +87,7 @@ start = datetime.now()
 # load the model before running
 SEED = 0
 TEST_EPS = 500
-Controller.load_models(episode=5000)
-# Controller.load_models()
+Controller.load_models(episode=7000)
 random.seed(SEED)
 day = 0
 control = ControlSignal()
@@ -101,65 +100,25 @@ while current_time <= end_time-RESOLUTION:
     inverter.forecast_demand = Demand
     inverter.forecast_generation = Generation
 
-    # control.EV_Max_Power = 7_000
-    # control_signal = control.generate_control_signal()
     control_signal = Controller.update(ev_info=ev, inverter_info=inverter, hvac_info=hvac, meter_info=meter)
     if control_signal:
         # print(control_signal)
         pass
-    # if current_time.time() == time(0, 0):
-    #     Controller.hvac_controller.temp_ref = random.randrange(15, 26)  # ref is set
+    if current_time.time() == time(0, 0):
+        if TARIFF_TYPE in ('Dynamic', 'Irish'):
+            House.tariff.prepare_day_ahead_tariffs(current_time)
+        # Controller.hvac_controller.temp_ref = random.randrange(15, 26)  # ref is set
 
     # Updating time
 
     current_time += RESOLUTION
 
 end = datetime.now()
-# plt.figure(1)
-# plt.savefig('Cost per kwh.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# plt.figure(2)
-# plt.hist(Controller.ev_controller.final_soc_list)
-# plt.title('Final SOC Distribution')
-# plt.savefig('final_soc.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# plt.figure(3)
-# plt.hist(Controller.ev_controller.initial_soc_list)
-# plt.title('Initial SOC Distribution')
-# plt.savefig('initial_soc.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# print(f"Simulation took {end - start:.4f} seconds")
-# print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
-# print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
-# ev_soc = ev_config.get("capacity Wh")
-# print(f'UnSatisfied SOC Wh: {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
-# print(f'Satisfied SOC Wh: {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
-# print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
-# print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
-# print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
-# print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost / Controller.ev_controller.total_ev_charging_energy}')
-# #
-print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
-#
-# import pyperclip
-#
-# unsat = Controller.ev_controller.unsatified_energy
-# not_full = Controller.ev_controller.not_full_count
-# cost = Controller.ev_controller.total_ev_charging_cost
-# energy = Controller.ev_controller.total_ev_charging_energy
-# ratio = cost / energy if energy != 0 else 0
-#
-# column = "\n".join([
-#     str(unsat),
-#     str(not_full),
-#     str(cost),
-#     str(energy),
-#     str(ratio)
-# ])
-#
-# pyperclip.copy(column)
-# print("Copied column-wise to clipboard:")
-# print(column)
 
-Controller.hems_database.df.to_csv(f'./Results/controller_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
-House.simulation_df.to_csv(f'./Results/simulation_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
+
+Controller.hems_database.df.to_csv(f'../Results/controller_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+House.simulation_df.to_csv(f'../Results/simulation_HVAC-ESS{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+
+
+
