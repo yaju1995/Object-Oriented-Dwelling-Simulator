@@ -51,6 +51,7 @@ class ReplayBufferNStep:
 
     gamma_pow will be gamma^n (or gamma^k if episode ends early within window).
     """
+
     def __init__(self, capacity: int = 100_000):
         self.buf: Deque[Tuple[np.ndarray, int, float, np.ndarray, float, float]] = deque(maxlen=capacity)
 
@@ -93,6 +94,7 @@ class NStepAdder:
       done_n = 1, s_{t+k} is terminal next_state,
       gamma_pow = gamma^k, and G_n sums only available rewards.
     """
+
     def __init__(self, gamma: float, n_step: int, main_buffer: ReplayBufferNStep):
         assert n_step >= 1
         self.gamma = float(gamma)
@@ -161,6 +163,7 @@ class NStepAdder:
 # ---------------------------
 @dataclass
 class DQNConfig:
+    name: str = 'DQN'
     gamma: float = 0.99
     lr: float = 1e-4
     buffer_capacity: int = 100_000
@@ -184,11 +187,59 @@ class DQNConfig:
     seed: Optional[int] = 0
 
 
+def generate_dqn_model_name(config: DQNConfig) -> str:
+    name_parts = [
+        config.name,
+        f"G{int(config.gamma * 100)}",
+        f"LR{config.lr:.0e}",
+        f"H{'x'.join(map(str, config.hidden))}",
+        f"B{config.batch_size}",
+        f"Buf{config.buffer_capacity // 1000}k",
+        f"NS{config.n_step}",
+        f"Eps{int(config.eps_start * 100)}to{int(config.eps_end * 100)}",
+        f"TU{config.target_update_every}",
+        config.device.upper()
+    ]
+    return "-".join(name_parts)
+
+
+def generate_dqn_config_text(config: DQNConfig) -> str:
+    return f"""Model Name: {generate_dqn_model_name(config)}
+
+Configuration Summary:
+-----------------------
+Algorithm           : {config.name}
+Gamma (γ)           : {config.gamma}
+Learning Rate       : {config.lr}
+Hidden Layers       : {config.hidden}
+Batch Size          : {config.batch_size}
+Buffer Capacity     : {config.buffer_capacity}
+
+N-Step Return       : {config.n_step}
+
+Epsilon-Greedy:
+  Start (ε₀)        : {config.eps_start}
+  End (εₑ)          : {config.eps_end}
+  Decay Steps       : {config.eps_decay_steps}
+
+Target Update Every : {config.target_update_every} steps
+
+Gradient Clip Norm  : {config.grad_clip_norm}
+Device              : {config.device.upper()}
+Seed                : {config.seed}
+"""
+
+
+def save_dqn_config_to_txt(config: DQNConfig, filename: str = "dqn_config.txt"):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(generate_dqn_config_text(config))
+
+
 # ---------------------------
 # DQN Agent (n-step)
 # ---------------------------
 class DQNAgent:
-    def __init__(self,name, obs_dim: int, n_actions: int, cfg: DQNConfig):
+    def __init__(self, name, obs_dim: int, n_actions: int, cfg: DQNConfig):
         self.name = name
         self.cfg = cfg
         self.device = cfg.device
@@ -250,7 +301,7 @@ class DQNAgent:
 
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.tensor(actions, dtype=torch.int64, device=self.device).unsqueeze(1)  # [B,1]
-        G_n = torch.tensor(G_n, dtype=torch.float32, device=self.device).unsqueeze(1)        # [B,1]
+        G_n = torch.tensor(G_n, dtype=torch.float32, device=self.device).unsqueeze(1)  # [B,1]
         next_states_n = torch.tensor(next_states_n, dtype=torch.float32, device=self.device)
         dones_n = torch.tensor(dones_n, dtype=torch.float32, device=self.device).unsqueeze(1)
         gamma_pows = torch.tensor(gamma_pows, dtype=torch.float32, device=self.device).unsqueeze(1)

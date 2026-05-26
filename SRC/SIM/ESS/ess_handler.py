@@ -319,3 +319,4 @@ class ESSHandler:
             f"({self.avai_capacity_Wh:.2f} Wh)"
         )
 
+        return soc_pct

@@ -2,7 +2,8 @@ import pandas as pd
 from datetime import timedelta, datetime, time
 from torch import nn
 
-from SRC.SIM.Tariff.tariffHandler import tariffHandler
+# from SRC.SIM.Tariff.tariffHandler import tariffHandler
+from SRC.SIM import *
 from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
 from SRC.Controller.Database.PandasDatabase import DataStore
@@ -21,8 +22,10 @@ from .EV_controller.EV_RL_CONFIG import (EV_RL_AGENT, EV_LOOK_AHEAD,
 
 # RL agent based controller ~~~~~~~~~~~~~~~~
 from .ESS_controller.ESS_RL_CONFIG import (ESS_RL_AGENT, ESS_LOOK_AHEAD,
-                                           ESS_INPUT_DIM, ESS_OUT_DIM,
                                            ESS_MODEL_NAME, ESS_MODEL_DIR)
+
+ESS_INPUT_DIM = ESS_RL_AGENT.cfg.obs_dim
+ESS_OUT_DIM = ESS_RL_AGENT.cfg.action_dim
 from SRC.Controller.ESS_controller.essRLControlLib import essController
 # from SRC.Controller.ESS_controller.essRLControlLib_oldFW import essController
 # from SRC.Controller.ESS_controller.essRLControlLib_DN import essController
@@ -39,8 +42,8 @@ from .HVAC_controller.HVAC_RL_CONFIG import (HVAC_RL_AGENT,
 class HEMSController:
     def __init__(self, name: str,
                  data_resolution: timedelta,
-                 meter_tariff: tariffHandler,
-                 ev_tariff: tariffHandler = None,  # pass ESS, EV and hvac control config from the simulator
+                 meter_tariff: TariffHandlerV2,
+                 ev_tariff: TariffHandlerV2 = None,  # pass ESS, EV and hvac control config from the simulator
                  ess_update_period: timedelta = timedelta(minutes=15),
                  ess_config: dict = None,
                  ev_update_period: timedelta = timedelta(minutes=15),
@@ -98,7 +101,7 @@ class HEMSController:
                                                                                        1000) / 1000,
                                                 look_ahead=ESS_LOOK_AHEAD,
                                                 energy_normalizer = self.ess_config.get('capacity Wh') / 1000,
-                                                enable_plotter=True,
+                                                enable_plotter=False,
                                                 trigger_time=[
                                                     time(0, 0),
                                                     # time(6, 0),

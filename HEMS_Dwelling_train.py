@@ -16,7 +16,7 @@ from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 import matplotlib.pyplot as plt
 RES = 60
 RESOLUTION = timedelta(minutes=RES)  # 1 min resolution info
-DURATION = timedelta(days=10000)
+DURATION = timedelta(days=300)
 START_TIME = datetime(2018, 1, 1)
 
 
@@ -123,22 +123,30 @@ while current_time <= end_time-RESOLUTION:
         # may be change the bound but let see first.
 
     # changing EV disconnect time: is received from the simulator then randomly chnage with probability
-    if ev_status == False: # to initialize the user requirement condtion with ev connection
-        if ev.ev_status:
-            ev_status = True
-            # Use probabiliy to update EV expexted soc or EV disconnect time
-    elif ev_status == True:
-        if ev.ev_status == False:
-            ev_status = False
+    # if ev_status == False: # to initialize the user requirement condtion with ev connection
+    #     if ev.ev_status:
+    #         ev_status = True
+    #         # Use probabiliy to update EV expexted soc or EV disconnect time
+    # elif ev_status == True:
+    #     if ev.ev_status == False:
+    #         ev_status = False
         # else:
         #     House.EV.user_set_plugout = #change
 
-    if (day + 1) % 5 == 0 or day == 1000:
-        percent = day / 1000 * 100
-        if day == 1000:  # force 100% at the end
-            percent = 100
-        bar = '█' * int(percent / 5) + '-' * (20 - int(percent / 5))
-        print(f"\rSeed {SEED} |{bar}| {percent:.1f}% completed ::{day}:: {Controller.ess_controller.avg_reward}", end="")
+    # ------------------------------------------------------------
+    # Progress display
+    # ------------------------------------------------------------
+    total_days = max(1, int(DURATION.total_seconds() // timedelta(days=1).total_seconds()))
+    percent = min(day / total_days * 100, 100)
+    bar = "█" * int(percent / 5) + "-" * (20 - int(percent / 5))
+
+    if day > 0 and (day % 5 == 0 or day == total_days):
+        avg_reward = getattr(Controller.ess_controller, "avg_reward", None)
+        print(
+            f"\rSeed {SEED} |{bar}| {percent:.1f}% completed "
+            f"::{day}/{total_days} days:: avg_reward={avg_reward}",
+            end="",
+        )
     # House.EV.user_set_plugout = #Define time
     # House.EV.expected_soc = # Define disconnected SOC
 
@@ -179,7 +187,7 @@ print(f"Simulation took {duration:.4f} seconds")
 # print(
 #     f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost / Controller.ev_controller.total_ev_charging_energy}')
 # print('')
-print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
+# print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
 Controller.hems_database.df.to_csv('./Results/controller_train_EV_V2G.csv')
 House.simulation_df.to_csv('./Results/simulation_train_EV_V2G.csv')

@@ -1,9 +1,11 @@
+
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 
 
 # defining equipment from OCHER
+
 class battery(BaseModel):
     capacity: int = 5
     capacity_kwh: int = 10

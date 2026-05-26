@@ -12,11 +12,12 @@ ESS_DDPG_config.batch_size = 1000
 ESS_DDPG_config.a_max = 1.0
 ESS_DDPG_config.a_min = -1.0
 ESS_DDPG_config.n_step = 4
+
 # ESS_DDPG_config.tau = 1
 ESS_DDPG_config.seed = 4
 ESS_LOOK_AHEAD = ESS_DDPG_config.n_step  # If you update this try to match the input state with this
-ESS_INPUT_DIM = 2 + ESS_LOOK_AHEAD*2  # try to match the observed state with delay steps
-ESS_OUT_DIM = 1
+ESS_DDPG_config.obs_dim = 2 + ESS_LOOK_AHEAD*2
+ESS_DDPG_config.action_dim = 1
 
 
 ESS_MODEL_DIR = f'../Models/ESS/Train_5kWh_0_5C/SAFE_DDPG_N_step_{ESS_DDPG_config.n_step}Y_100_RES_60mins_SEED{ESS_DDPG_config.seed}'
@@ -27,8 +28,6 @@ ESS_MODEL_NAME = f'seed_{ESS_DDPG_config.seed}.pth'
 
 
 ESS_RL_AGENT = Bound_DDPGAgent(name='ESSagent',
-                               obs_dim=ESS_INPUT_DIM,
-                               act_dim=ESS_OUT_DIM,
                                cfg=ESS_DDPG_config,
                                return_mode='nstep')
 

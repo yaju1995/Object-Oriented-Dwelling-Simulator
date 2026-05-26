@@ -7,10 +7,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import os
 
 from SRC.support.lib_config import CustomLogger
 
 logger = CustomLogger(command=False, color='Magenta')
+
 
 # ---------------------------
 # Small MLP helper
@@ -196,10 +198,57 @@ class EpisodeReturnAdder:
         self.reset()
 
 
+class SparseRewardAdder:
+    """
+    Sliding-window sparse reward smoother:
+      r'_0 = r0 + (1/n) * sum(r_i for i in window)
+    Emits shaped 1-step transitions.
+    """
+
+    def __init__(self, n: int, main_buffer: ReplayBuffer):
+        assert n >= 1
+        self.n = n
+        self.main_buffer = main_buffer
+        self.tmp: Deque[Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]] = deque(maxlen=n)
+
+    def reset(self):
+        self.tmp.clear()
+
+    def add(self, s, a, r, s2, done: bool):
+        self.tmp.append((s, a, float(r), s2, bool(done)))
+
+        # only emit when window is full
+        if len(self.tmp) < self.n:
+            return
+
+        # compute shaped reward
+        total_reward = sum(step[2] for step in self.tmp)
+        r0 = self.tmp[0][2]
+        shaped_r = r0 + (total_reward / self.n)
+
+        # emit shaped transition for the first step
+        s0, a0, _, _, _ = self.tmp[0]
+        self.main_buffer.push(s0, a0, shaped_r, s2, float(done), 1.0)
+
+        # slide window
+        self.tmp.popleft()
+
+        # if terminal, flush remaining windows
+        if done:
+            while len(self.tmp) > 0:
+                total_reward = sum(step[2] for step in self.tmp)
+                r0 = self.tmp[0][2]
+                shaped_r = r0 + (total_reward / self.n)
+
+                s0, a0, _, s2_last, done_last = self.tmp[0]
+                self.main_buffer.push(s0, a0, shaped_r, s2_last, float(done_last), 1.0)
+                self.tmp.popleft()
+
+
 # ---------------------------
 # One "collector" wrapper to support nstep / mc / hybrid
 # ---------------------------
-ReturnMode = Literal["nstep", "mc", "hybrid"]
+ReturnMode = Literal["nstep", "mc", "hybrid", "sparse"]
 
 
 class ReturnCollector:
@@ -212,8 +261,14 @@ class ReturnCollector:
 
     def __init__(self, mode: ReturnMode, gamma: float, buffer: ReplayBuffer, n_step: int = 4):
         self.mode = mode
-        self.nstep = NStepAdder(n=n_step, gamma=gamma, main_buffer=buffer) if mode in ("nstep", "hybrid") else None
-        self.mc = EpisodeReturnAdder(gamma=gamma, main_buffer=buffer) if mode in ("mc", "hybrid") else None
+        self.nstep = NStepAdder(n=n_step, gamma=gamma, main_buffer=buffer) \
+            if mode in ("nstep", "hybrid") else None
+
+        self.mc = EpisodeReturnAdder(gamma=gamma, main_buffer=buffer) \
+            if mode in ("mc", "hybrid") else None
+
+        self.sparse = SparseRewardAdder(n=n_step, main_buffer=buffer) \
+            if mode == "sparse" else None
 
     def reset(self):
         if self.nstep is not None:
@@ -224,8 +279,12 @@ class ReturnCollector:
     def add(self, s, a, r, s2, done: bool):
         if self.nstep is not None:
             self.nstep.add(s, a, r, s2, done)
+
         if self.mc is not None:
             self.mc.add(s, a, r, s2, done)
+
+        if self.sparse is not None:
+            self.sparse.add(s, a, r, s2, done)
 
 
 # ---------------------------
@@ -233,12 +292,15 @@ class ReturnCollector:
 # ---------------------------
 @dataclass
 class DDPGConfig:
+    name: str = 'DDPG'
     gamma: float = 0.99
     tau: float = 0.005
     actor_lr: float = 1e-3
     critic_lr: float = 1e-3
     buffer_capacity: int = 100_000
+    obs_dim: int = 4
     hidden: Tuple[int, int] = (64, 64)
+    action_dim: int = 1
     activation: Tuple = (nn.ReLU, nn.Tanh)
     batch_size: int = 128
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -246,7 +308,57 @@ class DDPGConfig:
     a_max: Optional[float] = 1.0
     a_min: Optional[float] = -1.0
     n_step = 1
+    bound_fn = None
 
+
+def generate_model_name(config: DDPGConfig) -> str:
+    name_parts = [
+        config.name,
+        f"G{int(config.gamma * 100)}",
+        f"T{str(config.tau).replace('.', '')}",
+        f"LR{config.actor_lr:.0e}",
+        f"H{'x'.join(map(str, config.hidden))}",
+        f"B{config.batch_size}",
+        f"Buf{config.buffer_capacity // 1000}k",
+        config.device.upper()
+    ]
+    return "-".join(name_parts)
+
+
+def generate_config_text(config: DDPGConfig) -> str:
+    activation_names = ', '.join([act.__name__ for act in config.activation])
+    return f"""Model Name: {generate_model_name(config)}
+
+Configuration Summary:
+-----------------------
+Algorithm       : {config.name}
+Gamma (γ)       : {config.gamma}
+Tau (τ)         : {config.tau}
+Actor LR        : {config.actor_lr}
+Critic LR       : {config.critic_lr}
+Hidden Layers   : {config.hidden}
+Activations     : ({activation_names})
+Observation Dim : {config.obs_dim}
+Action Dim      : {config.action_dim}
+Batch Size      : {config.batch_size}
+Buffer Capacity : {config.buffer_capacity}
+Device          : {config.device.upper()}
+Seed            : {config.seed}
+Bound Function  : {config.bound_fn.__name__}
+"""
+
+
+def save_config_to_txt(config: DDPGConfig, path: str, filename: str):
+    """
+    Save config text into a directory + filename.
+    Example:
+        save_config_to_txt(cfg, "./Results/DDPG/", "config.txt")
+    """
+    os.makedirs(path, exist_ok=True)  # ensure directory exists
+    full_path = os.path.join(path, filename)
+
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(generate_config_text(config))
 
 
 # ---------------------------
@@ -255,9 +367,7 @@ class DDPGConfig:
 class Bound_DDPGAgent:
     def __init__(
             self,
-            name:str,
-            obs_dim: int,
-            act_dim: int,
+            name: str,
             cfg: DDPGConfig,
             return_mode: ReturnMode = "nstep",
     ):
@@ -278,12 +388,12 @@ class Bound_DDPGAgent:
             torch.cuda.manual_seed_all(cfg.seed)
 
         # networks
-        self.actor = ActorNetwork(obs_dim, act_dim, cfg.hidden, cfg.activation).to(self.device)
-        self.actor_target = ActorNetwork(obs_dim, act_dim, cfg.hidden, cfg.activation).to(self.device)
+        self.actor = ActorNetwork(cfg.obs_dim, cfg.action_dim, cfg.hidden, cfg.activation).to(self.device)
+        self.actor_target = ActorNetwork(cfg.obs_dim, cfg.action_dim, cfg.hidden, cfg.activation).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
 
-        self.critic = CriticNetwork(obs_dim, act_dim, cfg.hidden, cfg.activation).to(self.device)
-        self.critic_target = CriticNetwork(obs_dim, act_dim, cfg.hidden, cfg.activation).to(self.device)
+        self.critic = CriticNetwork(cfg.obs_dim, cfg.action_dim, cfg.hidden, cfg.activation).to(self.device)
+        self.critic_target = CriticNetwork(cfg.obs_dim, cfg.action_dim, cfg.hidden, cfg.activation).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # optimizers
@@ -419,6 +529,7 @@ class Bound_DDPGAgent:
                 "cfg": self.cfg.__dict__,
                 "n_step": self.n_step,
             }, path)
+            save_config_to_txt(config=self.cfg, path=path, filename='config.txt')
             return f"Model saved successfully at: {path}"
         except Exception as e:
             return f"Error saving model to {path}:: Error: {e}"
@@ -460,8 +571,9 @@ class Bound_DDPGAgent:
             print(e)
             return f"Error loading model from {path}: {e}"
         # print('ERROR')
+
     def load_old(self, path):
-        checkpoint = torch.load(path,weights_only=False)
+        checkpoint = torch.load(path, weights_only=False)
         self.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.critic.load_state_dict(checkpoint['critic_state_dict'])
         self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
