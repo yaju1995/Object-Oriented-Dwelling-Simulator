@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from SRC.SIM.Simulator_fast import dwelling, SimulationEnded
+# from SRC.SIM.Simulator import dwelling
 from SRC.SIM.Simulator_Config.config_list_train import (
     pv_config,
     ev_config,
@@ -18,15 +19,14 @@ from SRC.SIM.Simulator_Config.config_list_train import (
 from SRC.Controller.HEMSControlRL import HEMSController
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 
-
 # ============================================================
 # Simulation settings
 # ============================================================
 
 RES = 60
 RESOLUTION = timedelta(minutes=RES)
-DURATION = timedelta(days=300)
-START_TIME = datetime(2018, 1, 1)
+DURATION = timedelta(days=5000)
+START_TIME = datetime(2018, 1, 1,0,0)
 
 SEED = 0
 random.seed(SEED)
@@ -104,7 +104,6 @@ House = dwelling(
     seed=SEED,
 )
 
-
 # ============================================================
 # Tariff setup
 # ============================================================
@@ -122,7 +121,6 @@ House.tariff.feed_tariff_model = Tariff_gen
 House.tariff.generate_tariff()
 House.tariff.updated_tariff()
 
-
 # ============================================================
 # Initialise simulator
 # ============================================================
@@ -131,7 +129,6 @@ House.initialized_df()
 
 # Important for Simulator_fast if tariff arrays are cached
 refresh_tariff_cache_if_available(House)
-
 
 # ============================================================
 # Controller setup
@@ -165,19 +162,14 @@ ev_status = False
 day = 0
 
 start = datetime.now()
+day_start = datetime.now()
 
-# print("Initial simulation input dataframe:")
-# print(House.simulation_df.head())
 
-# print(f"Simulation start: {START_TIME}")
-# print(f"Simulation end:   {House.end_time}")
-# print(f"Number of steps:  {House.n_steps}")
-
-while current_time<=end_time-RESOLUTION:
-
+while current_time <= end_time - RESOLUTION:
     inverter, meter, ev, hvac, status = House.step(control_signal)
+    step_end = datetime.now()
 
-    # current_time = status["Time"]
+    current_time = status["Time"]
 
     # ------------------------------------------------------------
     # Forecast for next control period [add forecasting model]
@@ -202,6 +194,7 @@ while current_time<=end_time-RESOLUTION:
     # ------------------------------------------------------------
 
     if current_time.time() == time(12, 0):
+
         # In a realistic setting, this represents getting the next-day tariff
         House.tariff.generate_tariff()
 
@@ -212,6 +205,9 @@ while current_time<=end_time-RESOLUTION:
         # In a realistic setting, this applies the next-day tariff
         House.tariff.updated_tariff()
 
+        day_end = datetime.now()
+        # duration = (day_end - day_start).total_seconds()
+        # print(f"\nSimulation took {day}:: {duration:.4f} seconds")
         # Refresh cached tariff arrays if Simulator_fast uses them
         # refresh_tariff_cache_if_available(House)
 
@@ -219,7 +215,8 @@ while current_time<=end_time-RESOLUTION:
         set_battery_soc_and_sync_array(House, random.uniform(0.05, 1.0))
 
         day += 1
-    #
+        day_start = datetime.now()
+
     # # ------------------------------------------------------------
     # # EV connection/disconnection logic
     # # ------------------------------------------------------------
@@ -231,6 +228,10 @@ while current_time<=end_time-RESOLUTION:
         if not ev.ev_status:
             ev_status = False
 
+    # other_end = datetime.now()
+    # duration = (other_end - other_start).total_seconds()
+    # print(f"\nOther took :: {duration:.4f} seconds")
+    # other_start = datetime.now()
     # ------------------------------------------------------------
     # Progress display
     # ------------------------------------------------------------
@@ -239,7 +240,7 @@ while current_time<=end_time-RESOLUTION:
     bar = "█" * int(percent / 5) + "-" * (20 - int(percent / 5))
 
     if day > 0 and (day % 5 == 0 or day == total_days):
-        avg_reward = getattr(Controller.ess_controller, "avg_reward", None)
+        avg_reward = Controller.ess_controller.avg_reward  #getattr(Controller.ess_controller, "avg_reward", None)
         print(
             f"\rSeed {SEED} |{bar}| {percent:.1f}% completed "
             f"::{day}/{total_days} days:: avg_reward={avg_reward}",
@@ -249,9 +250,8 @@ while current_time<=end_time-RESOLUTION:
     # ------------------------------------------------------------
     # Optional model saving
     # ------------------------------------------------------------
-    if day in (500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000):
-        Controller.save_models(day)
-
+    # if day in ( 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000):
+    #     Controller.save_models(day)
 
 # ============================================================
 # Export results
@@ -265,8 +265,8 @@ print(f"\nSimulation took {duration:.4f} seconds")
 # Simulator_fast does not continuously update House.simulation_df.
 # Use to_dataframe() for final simulation results.
 simulation_results = House.to_dataframe()
-
-controller_results = Controller.hems_database.df
+controller_results = Controller.hems_database.to_pandas()
+# controller_results = Controller.hems_database.df
 
 # print(f"Final House Cost: {controller_results['Instant Cost'].sum()}")
 

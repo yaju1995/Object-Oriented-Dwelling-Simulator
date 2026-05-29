@@ -14,12 +14,11 @@ from SRC.Controller.Database import PandasDatabase
 from SRC.Controller.HEMSControlRL import HEMSController
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 import matplotlib.pyplot as plt
+
 RES = 60
 RESOLUTION = timedelta(minutes=RES)  # 1 min resolution info
-DURATION = timedelta(days=300)
+DURATION = timedelta(days=500)
 START_TIME = datetime(2018, 1, 1)
-
-
 
 # demand_config = {
 #     'model': 'normal',
@@ -88,13 +87,16 @@ random.seed(SEED)
 # Controller.load_models(episode=1000)
 day = 0
 # Running a training loop
-while current_time <= end_time-RESOLUTION:
-
+while current_time <= end_time - RESOLUTION:
+    # step_start = datetime.now()
     inverter, meter, ev, hvac, status = House.step(control_signal)
+    # step_end = datetime.now()
+    # duration = (step_end - step_start).total_seconds()
+    # print(f"\nstep took :: {duration:.4f} seconds")
     # geting perfect future value
 
-    Demand = House.simulation_df.loc[current_time+RESOLUTION, "Demand Electric Power (kW)"] # next period
-    Generation = House.simulation_df.loc[current_time+RESOLUTION, "PV Electric Power (kW)"] # next period
+    Demand = House.simulation_df.loc[current_time + RESOLUTION, "Demand Electric Power (kW)"]  # next period
+    Generation = House.simulation_df.loc[current_time + RESOLUTION, "PV Electric Power (kW)"]  # next period
 
     inverter.forecast_demand = Demand
     inverter.forecast_generation = Generation
@@ -115,23 +117,23 @@ while current_time <= end_time-RESOLUTION:
         # print(f'{current_time.time()}: Mid night update tariff')
         House.tariff.updated_tariff()
         # update the SOC external for training
-        next_soc = House.Battery.set_soc(random.uniform(0.05, 1)) # reset that will occur
-        day +=1
+        next_soc = House.Battery.set_soc(random.uniform(0.05, 1))  # reset that will occur
+        day += 1
         # print(f'{current_time}: day')
         # updating the temp ref point
         # Controller.hvac_controller.temp_ref = random.randrange(15, 26) # ref is set
         # may be change the bound but let see first.
 
-    # changing EV disconnect time: is received from the simulator then randomly chnage with probability
-    # if ev_status == False: # to initialize the user requirement condtion with ev connection
+    # changing EV disconnect time: is received from the simulator then randomly change with probability
+    # if ev_status == False: # to initialize the user requirement condition with ev connection
     #     if ev.ev_status:
     #         ev_status = True
-    #         # Use probabiliy to update EV expexted soc or EV disconnect time
+    #         # Use probability to update EV expected soc or EV disconnect time
     # elif ev_status == True:
     #     if ev.ev_status == False:
     #         ev_status = False
-        # else:
-        #     House.EV.user_set_plugout = #change
+    # else:
+    #     House.EV.user_set_plugout = #change
 
     # ------------------------------------------------------------
     # Progress display
@@ -150,12 +152,11 @@ while current_time <= end_time-RESOLUTION:
     # House.EV.user_set_plugout = #Define time
     # House.EV.expected_soc = # Define disconnected SOC
 
-
     # if 24 hrs update tariff like in real case scenario
     # when and how will the tariff be updated
     # and if there is gap then how will the tariff be handled
     # if day in (30,50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950, 1000, 1250, 1500, 1750, 2000):
-    if day in (500, 1000, 2000, 3000, 4000, 5000,6000, 7000, 8000, 9000,10000):
+    if day in (1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000):
         Controller.save_models(day)
 # Save the models
 # Controller.save_models(day)

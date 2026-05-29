@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+
+# from time import perf_counter
 from datetime import timedelta, datetime, time
 from SRC.support.lib_config import CustomLogger
 from SRC.Controller.Database.PandasDatabase import DataStore
@@ -46,7 +48,7 @@ logger = CustomLogger(command=False, color='cyan')
 class essController:
     def __init__(self, rl_agent: Bound_DDPGAgent, mode='Train', resolution: timedelta = timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=15),
-                 global_database: DataStore = None,
+                 global_database=None,
                  max_charging_kw=0,
                  max_discharging_kw=0,
                  look_ahead=1,
@@ -280,46 +282,83 @@ class essController:
         return
 
     def get_state(self, control_time: datetime):
-        value = self.global_databased.get_instant_state(now_time=control_time, keys=['Consumption (kW)',
-                                                                                     'Battery SOC (-)',
-                                                                                     'Generation (kW)'])
-        # getting current time information
-        # print(value)
+
+        # ==========================================================
+        # 1. Read current values from database
+        # ==========================================================
+
+        value = self.global_databased.get_instant_state(
+            now_time=control_time,
+            keys=[
+                'Consumption (kW)',
+                'Battery SOC (-)',
+                'Generation (kW)'
+            ]
+        )
+
         consumption = value.get('Consumption (kW)')
         soc = value.get('Battery SOC (-)')
         generation = value.get('Generation (kW)')
 
-        forecast_surplus = round((self.forecast_generations - self.forecast_demands) / self.energy_normalizer, 6)
-        surplus = round((generation - consumption)/self.energy_normalizer, 6)
+        # ==========================================================
+        # 2. Forecast / surplus calculation
+        # ==========================================================
 
-        # print(f'now {surplus}')
-        # print(f'forecast {forecast_surplus}')
-        # print(consumption, generation, self.energy_normalizer, surplus)
+        forecast_surplus = (self.forecast_generations - self.forecast_demands
+                           ) / self.energy_normalizer
 
-        # getting next tariff
-        tariff_df = self.tariff_handler.get_tariff_range_df(control_time, period=self.look_ahead,
-                                                            resolution=self.update_period)
-        tariff_states = tariff_df['tariff'].tolist()
-        feed_tariff_states = tariff_df['feed_tariff'].tolist()
-        tariff_states = np.array(tariff_states)
+        surplus = (generation - consumption
+                  ) / self.energy_normalizer
+
+        # print(consumption, generation, self.forecast_demands, self.forecast_generations)
+        # ==========================================================
+        # 3. Get tariff arrays directly
+        # ==========================================================
+
+        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_array(
+            control_time,
+            period=self.look_ahead,
+            resolution=self.update_period
+        )
+
+        # ==========================================================
+        # 4. Normalize tariff
+        # ==========================================================
         im_tariff_max = self.tariff_handler.max_tariff
         im_tariff_min = self.tariff_handler.min_tariff
 
-        feed_tariff_states = np.array(feed_tariff_states)
         exp_tariff_max = self.tariff_handler.max_feed_tariff
         exp_tariff_min = self.tariff_handler.min_feed_tariff
 
-        tariff_max = round(max(exp_tariff_max, im_tariff_max),2)
-        tariff_min = round(min(exp_tariff_min, im_tariff_min),2)
-        # print(tariff_max, tariff_min)
+        tariff_max = max(exp_tariff_max, im_tariff_max)
+        tariff_min = min(exp_tariff_min, im_tariff_min)
 
-        tariff = np.round((tariff_states - tariff_min) / (tariff_max - tariff_min), 3)  # Normalized over max and min
-        feed_tariff = np.round((feed_tariff_states - tariff_min) / (tariff_max - tariff_min), 3)
-        # print(value)
-        logger.commandline(
-            f'state:{control_time}:::{soc}, {surplus}, {tariff_states},->{tariff},{feed_tariff_states}->{feed_tariff}')
-        # pass
-        return np.array([ soc,forecast_surplus, *tariff, *feed_tariff], dtype=float)
+        tariff_den = tariff_max - tariff_min
+        if tariff_den == 0:
+            tariff_den = 1e-8
+
+        tariff = (tariff_states - tariff_min) / tariff_den
+        feed_tariff = (feed_tariff_states - tariff_min) / tariff_den
+
+        # Optional: only use round if you really need it
+        # tariff = np.round(tariff, 3)
+        # feed_tariff = np.round(feed_tariff, 3)
+
+        # ==========================================================
+        # 5. Build state array
+        # ==========================================================
+
+        n_tariff = len(tariff)
+        n_feed = len(feed_tariff)
+
+        state = np.empty(2 + n_tariff + n_feed, dtype=np.float32)
+
+        state[0] = soc
+        state[1] = forecast_surplus
+        state[2:2 + n_tariff] = tariff
+        state[2 + n_tariff:] = feed_tariff
+
+        return state
 
     def compute_reward(self, control_time: datetime):  # replace control time wiht self time??
 
@@ -368,8 +407,8 @@ class essController:
         actual_power = value.get('Battery Electric Power (kW)')
         error_Reward = 0
         # print(set_power, actual_power)
-        if round(set_power, 3) != round(actual_power, 3):
-            print(f'Unbalance: { round(set_power, 3)}!={round(actual_power, 3)} ')
+        if round(set_power, 3) - round(actual_power, 3)>0.001:
+            print(f'Unbalance: {round(set_power, 3)}!={round(actual_power, 3)} ')
             logger.commandline(f'{set_power}!={actual_power} ')
             error_Reward = -5
         # print(f'{period_power} {set_power}: Cost Reward: {cost} Error Reward {error_Reward} ')

@@ -1,12 +1,14 @@
 import pandas as pd
 from datetime import timedelta, datetime, time
 from torch import nn
+from time import perf_counter
 
 # from SRC.SIM.Tariff.tariffHandler import tariffHandler
 from SRC.SIM import *
 from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
-from SRC.Controller.Database.PandasDatabase import DataStore
+# from SRC.Controller.Database.PandasDatabase import DataStore
+from SRC.Controller.Database.numpyDatabase import DataStore  # Using numpy array
 from .Constants import COLUMNS_KEYS
 
 from SRC.support.lib_config import CustomLogger
@@ -42,8 +44,8 @@ from .HVAC_controller.HVAC_RL_CONFIG import (HVAC_RL_AGENT,
 class HEMSController:
     def __init__(self, name: str,
                  data_resolution: timedelta,
-                 meter_tariff: TariffHandlerV2,
-                 ev_tariff: TariffHandlerV2 = None,  # pass ESS, EV and hvac control config from the simulator
+                 meter_tariff: TariffHandlerV2NP,
+                 ev_tariff: TariffHandlerV2NP = None,  # pass ESS, EV and hvac control config from the simulator
                  ess_update_period: timedelta = timedelta(minutes=15),
                  ess_config: dict = None,
                  ev_update_period: timedelta = timedelta(minutes=15),
@@ -67,8 +69,8 @@ class HEMSController:
 
         # Databased definition
         self.hems_database = DataStore(resolution=data_resolution)
-        self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
-        self.hems_logs.index.name = "timestamp"
+        # self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
+        # self.hems_logs.index.name = "timestamp"
         self.control_signals = ControlSignal()
         self.ev_controller = None
         self.ess_controller = None
@@ -100,7 +102,7 @@ class HEMSController:
                                                 max_discharging_kw=self.ess_config.get("discharging power W",
                                                                                        1000) / 1000,
                                                 look_ahead=ESS_LOOK_AHEAD,
-                                                energy_normalizer = self.ess_config.get('capacity Wh') / 1000,
+                                                energy_normalizer=self.ess_config.get('capacity Wh') / 1000,
                                                 enable_plotter=False,
                                                 trigger_time=[
                                                     time(0, 0),
@@ -150,7 +152,7 @@ class HEMSController:
         minute = self.resolution.total_seconds() / 60
 
         # Cost of consumed power
-        if meter_info.active_power>0:
+        if meter_info.active_power > 0:
             instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
         else:
             instant_cost = round(meter_info.active_power * hours * meter_info.feed_tariff, 4)
@@ -158,7 +160,7 @@ class HEMSController:
         user_exp_soc = 0
         user_dc_set_time = datetime(1, 1, 1, 0, 0, 0)
         if self.ev_controller is not None:
-            user_exp_soc = self.ev_controller.user_exp_soc,
+            user_exp_soc = self.ev_controller.user_exp_soc
             user_dc_set_time = self.ev_controller.user_dc_set_time
         temp_ref = 0
         if self.hvac_controller is not None:
@@ -208,119 +210,130 @@ class HEMSController:
             self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
 
         # HVAC control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
         if self.hvac_controller:
             self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(hvac_info=hvac_info)
         if self.control_signals.HVAC_Heating_Power is not None:
             self.control_signals.HVAC_Heating_Power = float(self.control_signals.HVAC_Heating_Power) * 1000
 
         # # Battery control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        t0 = perf_counter()
+
         if self.ess_controller:
             self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
                                                                                         inverter_info=inverter_info)
+
+        t1 = perf_counter()
         if self.control_signals.Battery_P_Setpoint is not None:
             self.control_signals.Battery_P_Setpoint = float(self.control_signals.Battery_P_Setpoint) * 1000
+        end = perf_counter()
 
+        # print(
+        #     f"ess took : {(end-t0)* 1000:.3f} ms | "
+        #     f"\nupdate took : {(t1-t0)* 1000:.3f} ms | "
+        #     f"\nset took : {(end-t1)* 1000:.3f} ms | "
+        #       )
         # # generate controller signals ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         control_signal = self.control_signals.generate_control_signal()
         # logger.commandline(control_signal)
         # return the generated signal
         return control_signal
 
-    def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resolution as well
-        """
-        Return exactly N samples ending at now_time, where:
-          N = past_period(hours) / data_resolution
-
-        Example:
-          data_resolution = 1 minute, past_period=3 hours -> 180 rows
-        """
-
-        now_time = pd.Timestamp(now_time)
-        res = self.resolution  # e.g. 1 min
-        period = pd.Timedelta(hours=past_period)
-
-        # how many rows we expect
-        expected_len = int(period / res)  # 3h/1min = 180
-
-        # Ensure now_time is aligned to resolution grid (optional but helpful)
-        now_aligned = now_time.floor(res)
-
-        # Pull a window (a bit larger than needed) then trim by length
-        cutoff = now_aligned - period
-        recent = self.hems_logs.loc[cutoff:now_aligned]
-
-        if recent.empty:
-            logger.commandline("Fallback: no data in requested window")
-            return None
-
-        # Take exactly the last expected_len rows
-        if len(recent) < expected_len:
-            logger.commandline(f"Fallback: insufficient rows (need {expected_len}, got {len(recent)})")
-            return None
-
-        control_data = recent.tail(expected_len)
-
-        # ---- Optional strict checks ----
-        # 1) Must end at now_aligned
-        if control_data.index[-1] != now_aligned:
-            logger.commandline(f"Fallback: last timestamp is {control_data.index[-1]} not {now_aligned}")
-            return None
-
-        # 2) Must be continuous at resolution (no missing minutes)
-        expected_index = pd.date_range(
-            end=now_aligned, periods=expected_len, freq=res
-        )
-        if not control_data.index.equals(expected_index):
-            logger.commandline("Fallback: missing timestamps / irregular index in the last window")
-            return None
-
-        return control_data
-
-    def get_resampled(
-            self,
-            df_sample: pd.DataFrame,
-            resolution: timedelta,
-            headers: list[str],
-            agg: str = "mean",
-    ) -> pd.DataFrame | None:
-        """
-        Resample the DataFrame to a given resolution for specific headers.
-        Returns  extra value,
-
-        resolution : datetime.timedelta (e.g., timedelta(minutes=15))
-        headers    : list of column names to include
-        agg        : aggregation function ('mean', 'sum', 'max', 'min')
-        """
-
-        if df_sample is None or df_sample.empty:
-            return None
-
-        # ---- Validate datetime index ----
-        if not isinstance(df_sample.index, pd.DatetimeIndex):
-            raise ValueError("df_sample must have a DatetimeIndex for resampling")
-
-        # ---- Validate headers ----
-        missing = set(headers) - set(df_sample.columns)
-        if missing:
-            raise KeyError(f"Missing columns in df_sample: {missing}")
-
-        # ---- Convert timedelta to pandas frequency ----
-        freq = f"{int(resolution.total_seconds())}s"
-
-        # ---- Select requested headers only ----
-        df = df_sample[headers]
-
-        # ---- Apply aggregation ----
-        if agg == "mean":
-            return df.resample(freq).mean()
-        elif agg == "sum":
-            return df.resample(freq).sum()
-        elif agg == "max":
-            return df.resample(freq).max()
-        elif agg == "min":
-            return df.resample(freq).min()
-        else:
-            raise ValueError(f"Unsupported aggregation: {agg}")
+    # def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resolution as well
+    #     """
+    #     Return exactly N samples ending at now_time, where:
+    #       N = past_period(hours) / data_resolution
+    #
+    #     Example:
+    #       data_resolution = 1 minute, past_period=3 hours -> 180 rows
+    #     """
+    #
+    #     now_time = pd.Timestamp(now_time)
+    #     res = self.resolution  # e.g. 1 min
+    #     period = pd.Timedelta(hours=past_period)
+    #
+    #     # how many rows we expect
+    #     expected_len = int(period / res)  # 3h/1min = 180
+    #
+    #     # Ensure now_time is aligned to resolution grid (optional but helpful)
+    #     now_aligned = now_time.floor(res)
+    #
+    #     # Pull a window (a bit larger than needed) then trim by length
+    #     cutoff = now_aligned - period
+    #     recent = self.hems_logs.loc[cutoff:now_aligned]
+    #
+    #     if recent.empty:
+    #         logger.commandline("Fallback: no data in requested window")
+    #         return None
+    #
+    #     # Take exactly the last expected_len rows
+    #     if len(recent) < expected_len:
+    #         logger.commandline(f"Fallback: insufficient rows (need {expected_len}, got {len(recent)})")
+    #         return None
+    #
+    #     control_data = recent.tail(expected_len)
+    #
+    #     # ---- Optional strict checks ----
+    #     # 1) Must end at now_aligned
+    #     if control_data.index[-1] != now_aligned:
+    #         logger.commandline(f"Fallback: last timestamp is {control_data.index[-1]} not {now_aligned}")
+    #         return None
+    #
+    #     # 2) Must be continuous at resolution (no missing minutes)
+    #     expected_index = pd.date_range(
+    #         end=now_aligned, periods=expected_len, freq=res
+    #     )
+    #     if not control_data.index.equals(expected_index):
+    #         logger.commandline("Fallback: missing timestamps / irregular index in the last window")
+    #         return None
+    #
+    #     return control_data
+    #
+    # def get_resampled(
+    #         self,
+    #         df_sample: pd.DataFrame,
+    #         resolution: timedelta,
+    #         headers: list[str],
+    #         agg: str = "mean",
+    # ) -> pd.DataFrame | None:
+    #     """
+    #     Resample the DataFrame to a given resolution for specific headers.
+    #     Returns  extra value,
+    #
+    #     resolution : datetime.timedelta (e.g., timedelta(minutes=15))
+    #     headers    : list of column names to include
+    #     agg        : aggregation function ('mean', 'sum', 'max', 'min')
+    #     """
+    #
+    #     if df_sample is None or df_sample.empty:
+    #         return None
+    #
+    #     # ---- Validate datetime index ----
+    #     if not isinstance(df_sample.index, pd.DatetimeIndex):
+    #         raise ValueError("df_sample must have a DatetimeIndex for resampling")
+    #
+    #     # ---- Validate headers ----
+    #     missing = set(headers) - set(df_sample.columns)
+    #     if missing:
+    #         raise KeyError(f"Missing columns in df_sample: {missing}")
+    #
+    #     # ---- Convert timedelta to pandas frequency ----
+    #     freq = f"{int(resolution.total_seconds())}s"
+    #
+    #     # ---- Select requested headers only ----
+    #     df = df_sample[headers]
+    #
+    #     # ---- Apply aggregation ----
+    #     if agg == "mean":
+    #         return df.resample(freq).mean()
+    #     elif agg == "sum":
+    #         return df.resample(freq).sum()
+    #     elif agg == "max":
+    #         return df.resample(freq).max()
+    #     elif agg == "min":
+    #         return df.resample(freq).min()
+    #     else:
+    #         raise ValueError(f"Unsupported aggregation: {agg}")
 
     def save_models(self, episode=None):
         if episode is not None:
@@ -375,4 +388,3 @@ class HEMSController:
             logger.commandline("Load HVAC Controller")
             HVAC_PATH = os.path.join(HVAC_MODEL_DIR, HVAC_name)
             logger.commandline(self.hvac_controller.rl_agent.load(HVAC_PATH))
-

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta, datetime
 from typing import Optional
-
+from time import perf_counter
 import pandas as pd
 
 from SRC.support import CustomLogger
@@ -126,7 +126,8 @@ class ESSHandler:
         self,
         power_setpoint_W: float,
         timestamp: Optional[datetime] = None
-    ) -> dict:
+    ) :
+        t0 = perf_counter()
         """
         Advance ESS by one resolution step.
 
@@ -181,19 +182,27 @@ class ESSHandler:
         actual_power_W = actual_terminal_Wh / self.dt_hours
 
         # ---------- Record history ----------
-        self._record_step(
-            timestamp,
-            power_setpoint_W=req_power_W,
-            actual_power_W=actual_power_W,
-            batt_Wh=batt_Wh,
-        )
+        # self._record_step(
+        #     timestamp,
+        #     power_setpoint_W=req_power_W,
+        #     actual_power_W=actual_power_W,
+        #     batt_Wh=batt_Wh,
+        # )
         # kWh = round(actual_power_W / 1000.0, 6)
+        # t1 = perf_counter()
+        # print(f"battery step : {(t1-t0)* 1000:.3f} ms | ")
         # ---------- Return contract ----------
         return {
             'Battery SOC (-)': round(self.getStateOfCharge() / 100.0, 6),
             'Battery Electric Power (kW)': round(actual_power_W / 1000.0, 6),
             'Battery Set Power (kW)': round(power_setpoint_W/1000, 6)
         }
+        # batt_soc = round(self.getStateOfCharge() / 100.0, 6)
+        # batt_power = round(actual_power_W / 1000.0, 6)
+        # batt_set_power = round(power_setpoint_W/1000, 6)
+
+        # return batt_soc,batt_power,batt_set_power
+
 
     # ------------------------------------------------------------------
     def _limit_by_soc(self, batt_Wh: float) -> float:

@@ -29,7 +29,9 @@ This file keeps compatibility with your existing handler classes:
 
 from __future__ import annotations
 
+import datetime
 import datetime as dt
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -39,7 +41,8 @@ from SRC.SIM.ESS.ess_handler import ESSHandler
 from SRC.SIM.EV.ev_handler import EVHandler
 from SRC.SIM.Thermal.thermal_handler import ThermalHandler
 from SRC.SIM.Weather.epwhandler_V_1_0_3 import EPWWeatherHandler
-from SRC.SIM.Tariff.tariffHandler_V_2 import tariffHandler
+# from SRC.SIM.Tariff.tariffHandler_V_2 import tariffHandler
+from SRC.SIM.Tariff.tariffHandler_V_2_numpy import tariffHandler
 from SRC.SIM.DataGenerator.data_generators import PatternGenerationHandler
 from SRC.support.lib_config import CustomLogger
 
@@ -688,6 +691,154 @@ class DwellingFast:
             "Total Reactive Power (kVAR)": net_active_kw,
         }
 
+    from time import perf_counter
+
+    def update_profiled(self, control: dict | None) -> dict:
+        if control is None:
+            control = {}
+
+        t0 = perf_counter()
+
+        i, t = self._advance_step()
+
+        demand_kw = float(self.demand_kw_arr[i])
+        pv_kw = float(self.pv_kw_arr[i])
+
+        t_base = perf_counter()
+
+        # ---------------- EV ----------------
+        ev_kw = 0.0
+        ev_set_kw = 0.0
+        ev_soc = 0.0
+        ev_parked = 0.0
+        user_plug_out_time = None
+        expected_soc = 0.0
+
+        if self.EV:
+            ev_control = control.get("EV", {})
+            ev_power_set = ev_control.get("Max Power", 0)
+
+            ev_status = self.EV.step(
+                control_power_W=ev_power_set,
+                timestamp=t,
+            )
+
+            ev_kw = float(ev_status.get("EV Electric Power (kW)", 0.0) or 0.0)
+            ev_set_kw = float(ev_status.get("EV Set Power (kW)", 0.0) or 0.0)
+            ev_soc = float(ev_status.get("EV SOC (-)", 0.0) or 0.0)
+            ev_parked = float(ev_status.get("EV Parked", 0.0) or 0.0)
+            user_plug_out_time = ev_status.get("User Plug Out Time")
+            expected_soc = float(ev_status.get("Expected SOC", 0.0) or 0.0)
+
+            self.ev_kw_arr[i] = ev_kw
+            self.ev_set_kw_arr[i] = ev_set_kw
+            self.ev_soc_arr[i] = ev_soc
+            self.ev_parked_arr[i] = ev_parked
+            self.ev_plug_out_time_arr[i] = user_plug_out_time
+            self.ev_expected_soc_arr[i] = expected_soc
+
+        t_ev = perf_counter()
+
+        # ---------------- Thermal ----------------
+        thermal_kw = 0.0
+        indoor_temp = float(self.indoor_temp_arr[i])
+
+        if self.Thermal:
+            hvac_control = control.get("HVAC Heating", {})
+            power_p_set = hvac_control.get("P Setpoint", 0)
+
+            thermal_kw = abs(float(power_p_set) / 1000.0)
+            outdoor_temp = self.outdoor_temp_arr[i]
+
+            indoor_temp = float(
+                self.Thermal.update(
+                    power_W=control.get("thermal_kw", power_p_set),
+                    external_temperature=float(outdoor_temp),
+                )
+            )
+
+            self.hvac_kw_arr[i] = thermal_kw
+            self.indoor_temp_arr[i] = indoor_temp
+
+        t_thermal = perf_counter()
+
+        # ---------------- Battery ----------------
+        battery_kw = 0.0
+        battery_set_kw = 0.0
+        battery_soc = 0.0
+
+        if self.Battery:
+            battery_control = control.get("Battery", {})
+            power_p_set = battery_control.get("P Setpoint", 0)
+            t_battery_control = perf_counter()
+            # battery_status = self.Battery.update(
+            #     power_setpoint_W=power_p_set,
+            #     timestamp=t,
+            # )
+            battery_soc, battery_kw, battery_set_kw, = self.Battery.update(
+                power_setpoint_W=power_p_set,
+                timestamp=t,
+            )
+            t_battery_update = perf_counter()
+            # battery_kw = float(battery_status.get("Battery Electric Power (kW)", 0.0) or 0.0)
+            # battery_set_kw = float(battery_status.get("Battery Set Power (kW)", 0.0) or 0.0)
+            # battery_soc = float(battery_status.get("Battery SOC (-)", 0.0) or 0.0)
+
+            # print(battery_soc, battery_kw, battery_set_kw,)
+            self.battery_kw_arr[i] = battery_kw
+            self.battery_set_kw_arr[i] = battery_set_kw
+            self.battery_soc_arr[i] = battery_soc
+            t_battery_update_info = perf_counter()
+        t_battery = perf_counter()
+
+        # ---------------- Power balance ----------------
+        total_load_kw = demand_kw + ev_kw + thermal_kw
+        total_generation_kw = pv_kw - battery_kw
+        net_active_kw = round(total_load_kw - total_generation_kw, 3)
+
+        self.total_kw_arr[i] = net_active_kw
+        self.total_kvar_arr[i] = net_active_kw
+
+        t_balance = perf_counter()
+
+        out = {
+            "Time": t,
+            "Demand Electric Power (kW)": demand_kw,
+            "PV Electric Power (kW)": pv_kw,
+            "EV Electric Power (kW)": ev_kw,
+            "EV Set Power (kW)": ev_set_kw,
+            "EV SOC (-)": ev_soc,
+            "EV Parked": ev_parked,
+            "User Plug Out Time": user_plug_out_time,
+            "Expected SOC": expected_soc,
+            "Battery Electric Power (kW)": battery_kw,
+            "Battery Set Power (kW)": battery_set_kw,
+            "Battery SOC (-)": battery_soc,
+            "HVAC Heating Electric Power (kW)": thermal_kw,
+            "Temperature - Indoor (C)": indoor_temp,
+            "Temperature - Outdoor (C)": float(self.outdoor_temp_arr[i]) if not np.isnan(
+                self.outdoor_temp_arr[i]) else np.nan,
+            "Total Electric Power (kW)": net_active_kw,
+            "Total Reactive Power (kVAR)": net_active_kw,
+        }
+
+        t_return = perf_counter()
+
+        print(
+            f"base={(t_base - t0) * 1000:.3f} ms | "
+            f"EV={(t_ev - t_base) * 1000:.3f} ms | "
+            f"thermal={(t_thermal - t_ev) * 1000:.3f} ms | "
+            f"battery={(t_battery - t_thermal) * 1000:.3f} ms | "
+            f"battery control ={(t_battery_control - t_thermal) * 1000:.3f} ms | "
+            f"battery update={(t_battery_update - t_battery_control) * 1000:.3f} ms | "
+            f"battery info={(t_battery_update_info - t_battery_update) * 1000:.3f} ms | "
+
+            f"balance={(t_balance - t_battery) * 1000:.3f} ms | "
+            f"return_dict={(t_return - t_balance) * 1000:.3f} ms | "
+            f"total={(t_return - t0) * 1000:.3f} ms"
+        )
+
+        return out
     def step(self, control_signal: dict | None) -> tuple[InverterModel, MeterModel, EVModel, HVACModel, dict]:
         """
         Main external simulator step method.
@@ -696,7 +847,10 @@ class DwellingFast:
             InverterModel, MeterModel, EVModel, HVACModel, house_status
         """
         try:
+
             house_status = self.update(control_signal)
+            # house_status = self.update_profiled(control_signal)
+
         except StopIteration as exc:
             raise SimulationEnded("Simulation Ended -> add days to sim") from exc
 
