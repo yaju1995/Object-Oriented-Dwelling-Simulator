@@ -69,8 +69,7 @@ class HEMSController:
 
         # Databased definition
         self.hems_database = DataStore(resolution=data_resolution)
-        # self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
-        # self.hems_logs.index.name = "timestamp"
+
         self.control_signals = ControlSignal()
         self.ev_controller = None
         self.ess_controller = None
@@ -79,13 +78,13 @@ class HEMSController:
         self.ess_config = ess_config
         self.hvac_config = hvac_config
         # EV RL controller
-        if EV_RL_AGENT is not None:
+        if EV_RL_AGENT is not None :
             self.ev_controller = evController(rl_agent=EV_RL_AGENT, resolution=self.resolution,
                                               update_period=self.ev_update_period,
                                               global_database=self.hems_database, mode=mode,
                                               max_charging_power=ev_config.get('charging power W', 7_000) / 1000,
                                               look_ahead=EV_LOOK_AHEAD,
-                                              enable_plotter=True)
+                                              enable_plotter=False)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if ev_tariff is None:
                 self.ev_controller.tariff_handler = meter_tariff
@@ -198,6 +197,7 @@ class HEMSController:
             'Heating Electric Energy (kWh)': hvac_info.hvac_power * hours,
             'Temperature - Ref (C)': temp_ref
         }
+        # print(now_time, row)
 
         # Database test ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         self.hems_database.append(now_time, row)  # First update row then collect information

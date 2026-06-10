@@ -22,7 +22,7 @@ RESOLUTION = timedelta(minutes=60)  # 1 min resolution info
 DURATION = timedelta(hours=8683)
 # DURATION = timedelta(hours=48)
 START_TIME = datetime(2020, 1, 1,0,0)
-TARIFF_TYPE = 'TOU'
+TARIFF_TYPE = 'Irish'
 
 House = dwelling(name='Dwelling_1',
                  start_time=START_TIME,
@@ -87,7 +87,7 @@ start = datetime.now()
 # load the model before running
 SEED = 0
 TEST_EPS = 500
-Controller.load_models(episode=7000)
+Controller.load_models(episode=5000)
 random.seed(SEED)
 day = 0
 control = ControlSignal()
@@ -115,9 +115,10 @@ while current_time <= end_time-RESOLUTION:
 
 end = datetime.now()
 
-print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
+Controller_df = Controller.hems_database.to_pandas()
+print(f'Final House Cost: {Controller_df["Instant Cost"].sum()}')
 
-Controller.hems_database.df.to_csv(f'../Results/controller_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+Controller_df.to_csv(f'../Results/controller_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
 House.simulation_df.to_csv(f'../Results/simulation_HVAC-ESS{TARIFF_TYPE}_{TEST_EPS}_change.csv')
 
 

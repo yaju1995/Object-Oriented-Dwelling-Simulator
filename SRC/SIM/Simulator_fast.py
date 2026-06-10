@@ -373,7 +373,7 @@ class DwellingFast:
             logger.commandline("No thermal load detected")
 
         self.compile_runtime_arrays()
-        self.compile_tariff_arrays()
+
 
     @staticmethod
     def _safe_join_replace(base: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
@@ -439,7 +439,6 @@ class DwellingFast:
 
         self.simulation_df = self._safe_join_replace(self.simulation_df, df)
         self.compile_runtime_arrays()
-        self.compile_tariff_arrays()
 
         logger.commandline(f"Updated columns: {sorted(columns)}")
 
@@ -535,22 +534,6 @@ class DwellingFast:
 
         self.compiled = True
 
-    def compile_tariff_arrays(self) -> None:
-        """
-        Precompute tariff and feed-in tariff for each simulation step.
-        This avoids repeated tariff calculation inside the runtime loop.
-        """
-        self.tariff_arr = np.zeros(self.n_steps, dtype=np.float64)
-        self.feed_tariff_arr = np.zeros(self.n_steps, dtype=np.float64)
-
-        if self.tariff is None:
-            return
-
-        for i, t in enumerate(self.time_index):
-            tariff_value, feed_tariff_value = self.tariff.get_tariff(t.time())
-            self.tariff_arr[i] = float(tariff_value)
-            self.feed_tariff_arr[i] = float(feed_tariff_value)
-
     # ---------------------------------------------------------------------
     # Fast stepping
     # ---------------------------------------------------------------------
@@ -564,16 +547,6 @@ class DwellingFast:
 
         self.now_time = self.time_index[self.step_idx]
         return self.step_idx, self.now_time
-
-    def get_next_24h_tariffs_fast(self, i: int) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Return next-24h tariff arrays by slicing precomputed tariff arrays.
-        If the simulation is near the end, the returned arrays are shorter.
-        """
-        steps_per_hour = max(1, int(dt.timedelta(hours=1) / self.resolution))
-        window_steps = 24 * steps_per_hour
-        end = min(i + window_steps, self.n_steps)
-        return self.tariff_arr[i:end], self.feed_tariff_arr[i:end]
 
     def update(self, control: dict | None) -> dict:
         """
@@ -839,57 +812,138 @@ class DwellingFast:
         )
 
         return out
+
     def step(self, control_signal: dict | None) -> tuple[InverterModel, MeterModel, EVModel, HVACModel, dict]:
         """
-        Main external simulator step method.
+        Main external simulator step method with timing measurement.
 
-        Returns the same tuple structure as the original simulator:
+        Returns:
             InverterModel, MeterModel, EVModel, HVACModel, house_status
         """
-        try:
 
+        t_total_start = perf_counter()
+
+        t_update = 0.0
+        t_inverter = 0.0
+        t_meter = 0.0
+        t_tariff = 0.0
+        t_ev = 0.0
+        t_hvac = 0.0
+        t_return = 0.0
+
+        # ==========================================================
+        # 1. Main simulator update
+        # ==========================================================
+        t0 = perf_counter()
+
+        try:
             house_status = self.update(control_signal)
             # house_status = self.update_profiled(control_signal)
 
         except StopIteration as exc:
             raise SimulationEnded("Simulation Ended -> add days to sim") from exc
 
+        t_update = perf_counter() - t0
+
         i = self.step_idx
         time_value = house_status["Time"]
 
-        # ---------------- Inverter model ----------------
+        # ==========================================================
+        # 2. Inverter model update
+        # ==========================================================
+        t0 = perf_counter()
+
         self.InverterModel.time = time_value
         self.InverterModel.pv_power = float(house_status.get(INVERTER[0], 0.0))
         self.InverterModel.battery_power = float(house_status.get(INVERTER[1], 0.0))
         self.InverterModel.battery_soc = float(house_status.get(INVERTER[2], 0.0))
 
-        # ---------------- Meter model ----------------
+        t_inverter = perf_counter() - t0
+
+        # ==========================================================
+        # 3. Meter model update, excluding tariff
+        # ==========================================================
+        t0 = perf_counter()
+
         self.MeterModel.time = time_value
         self.MeterModel.active_power = float(house_status.get(NET_POWER[0], 0.0))
         self.MeterModel.reactive_power = float(house_status.get(NET_POWER[1], 0.0))
 
-        self.MeterModel.tariff = float(self.tariff_arr[i])
-        self.MeterModel.feed_tariff = float(self.feed_tariff_arr[i])
-        self.MeterModel.tariff_24hrs, self.MeterModel.feed_tariff_24hrs = self.get_next_24h_tariffs_fast(i)
+        t_meter = perf_counter() - t0
+
+        # ==========================================================
+        # 4. Tariff lookup and meter period
+        # ==========================================================
+        t0 = perf_counter()
+
+        tariff, feed_tariff = self.tariff.get_tariff(time_value.time())
+        self.MeterModel.tariff = float(tariff)
+        self.MeterModel.feed_tariff = float(feed_tariff)
+
+        # self.MeterModel.tariff_24hrs, self.MeterModel.feed_tariff_24hrs = self.get_next_24h_tariffs_fast(i)
         self.MeterModel.add_period(self.resolution.total_seconds() / 60.0)
 
-        # ---------------- EV model ----------------
+        t_tariff = perf_counter() - t0
+
+        # ==========================================================
+        # 5. EV model update
+        # ==========================================================
+        t0 = perf_counter()
+
         self.EVModel.time = time_value
         self.EVModel.ev_status = bool(house_status.get(EV[0], 0.0))
+
         if self.EVModel.ev_status:
             self.EVModel.ev_soc = float(house_status.get(EV[1], 0.0))
             self.EVModel.user_ev_dc_time = house_status.get(EV[3], 0)
             self.EVModel.expected_soc = int(house_status.get(EV[4], 0) or 0)
         else:
             self.EVModel.ev_soc = 0.0
+
         self.EVModel.ev_power = float(house_status.get(EV[2], 0.0))
 
-        # ---------------- HVAC model ----------------
+        t_ev = perf_counter() - t0
+
+        # ==========================================================
+        # 6. HVAC model update
+        # ==========================================================
+        t0 = perf_counter()
+
         self.HVACModel.time = time_value
         self.HVACModel.ti = float(house_status.get(HVAC[0], 0.0))
         self.HVACModel.hvac_power = float(house_status.get(HVAC[1], 0.0))
 
-        return self.InverterModel, self.MeterModel, self.EVModel, self.HVACModel, house_status
+        t_hvac = perf_counter() - t0
+
+        # ==========================================================
+        # 7. Return timing
+        # ==========================================================
+        t0 = perf_counter()
+
+        result = (
+            self.InverterModel,
+            self.MeterModel,
+            self.EVModel,
+            self.HVACModel,
+            house_status,
+        )
+
+        t_return = perf_counter() - t0
+        t_total = perf_counter() - t_total_start
+
+        # print(
+        #     f"external step timing @ {time_value} | "
+        #     f"update={t_update * 1000:.4f} ms | "
+        #     f"inverter={t_inverter * 1000:.4f} ms | "
+        #     f"meter={t_meter * 1000:.4f} ms | "
+        #     f"tariff={t_tariff * 1000:.4f} ms | "
+        #     f"ev={t_ev * 1000:.4f} ms | "
+        #     f"hvac={t_hvac * 1000:.4f} ms | "
+        #     f"return={t_return * 1000:.4f} ms | "
+        #     f"total={t_total * 1000:.4f} ms"
+        # )
+
+        return result
 
     # ---------------------------------------------------------------------
     # Export / logging

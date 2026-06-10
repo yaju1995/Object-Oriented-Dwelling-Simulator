@@ -82,9 +82,6 @@ class essController:
             else:
                 self.set_battery_power = surplus
 
-
-
-
         return self.set_battery_power
 
         #################################################################################################

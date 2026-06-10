@@ -2,11 +2,14 @@ import pandas as pd
 from datetime import timedelta
 from torch import nn
 
-from SRC.SIM.Tariff.tariffHandler import tariffHandler
+from SRC.SIM import *
 from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
-from SRC.Controller.Database.PandasDatabase import DataStore
+# from SRC.Controller.Database.PandasDatabase import DataStore
+from SRC.Controller.Database.numpyDatabase import DataStore  # Using numpy array
+
 from .Constants import COLUMNS_KEYS
+
 # from SRC.SIM.Simulator_Config.config_list import (ev_config, battery_config)
 
 
@@ -33,16 +36,15 @@ from SRC.Controller.HVAC_controller.hvacRuleControlLib import hvacController
 class HEMSController:
     def __init__(self, name: str,
                  data_resolution: timedelta,
-                 meter_tariff: tariffHandler,
-                 ev_tariff: tariffHandler = None,  # pass ESS, EV and hvac control config from the simulator
+                 meter_tariff: TariffHandlerV2NP,
+                 ev_tariff: TariffHandlerV2NP = None,  # pass ESS, EV and hvac control config from the simulator
                  ess_update_period: timedelta = timedelta(minutes=15),
                  ess_config: dict = None,
                  ev_update_period: timedelta = timedelta(minutes=15),
                  ev_config: dict = None,
                  havc_update_period: timedelta = timedelta(minutes=5),
                  hvac_config: dict = None,
-                 mode='Train',
-                 controller='RL'):
+                 mode='Train'):
         """
 
         :param name: name for the controller
@@ -58,10 +60,7 @@ class HEMSController:
         # self.mode = mode
         # Databased definition
         self.hems_database = DataStore(resolution=data_resolution)
-        self.hems_logs = pd.DataFrame(columns=COLUMNS_KEYS)
-        self.hems_logs.index.name = "timestamp"
         self.control_signals = ControlSignal()
-        self.controller = controller
         self.ev_controller = None
         self.ess_controller = None
         self.hvac_controller = None

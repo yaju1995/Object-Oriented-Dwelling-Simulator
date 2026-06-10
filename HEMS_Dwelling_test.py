@@ -115,51 +115,9 @@ while current_time <= end_time-RESOLUTION:
     current_time += RESOLUTION
 
 end = datetime.now()
-# plt.figure(1)
-# plt.savefig('Cost per kwh.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# plt.figure(2)
-# plt.hist(Controller.ev_controller.final_soc_list)
-# plt.title('Final SOC Distribution')
-# plt.savefig('final_soc.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# plt.figure(3)
-# plt.hist(Controller.ev_controller.initial_soc_list)
-# plt.title('Initial SOC Distribution')
-# plt.savefig('initial_soc.png')  # Save as PNG, PDF, SVG, etc.
-# plt.show()
-# print(f"Simulation took {end - start:.4f} seconds")
-# print(f'UnSatisfied SOC : {Controller.ev_controller.unsatified_energy}')
-# print(f'Satisfied SOC : {Controller.ev_controller.satisfied_energy}')
-# ev_soc = ev_config.get("capacity Wh")
-# print(f'UnSatisfied SOC Wh: {Controller.ev_controller.unsatified_energy * ev_config.get("capacity Wh")}')
-# print(f'Satisfied SOC Wh: {Controller.ev_controller.satisfied_energy * ev_config.get("capacity Wh")}')
-# print(f'Not fill charge count: {Controller.ev_controller.not_full_count}')
-# print(f'EV only charging cost : {Controller.ev_controller.total_ev_charging_cost}')
-# print(f'EV only charging energy : {Controller.ev_controller.total_ev_charging_energy}')
-# print(f'EV only total $/kwh : {Controller.ev_controller.total_ev_charging_cost / Controller.ev_controller.total_ev_charging_energy}')
-# #
-print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
-#
-# import pyperclip
-#
-# unsat = Controller.ev_controller.unsatified_energy
-# not_full = Controller.ev_controller.not_full_count
-# cost = Controller.ev_controller.total_ev_charging_cost
-# energy = Controller.ev_controller.total_ev_charging_energy
-# ratio = cost / energy if energy != 0 else 0
-#
-# column = "\n".join([
-#     str(unsat),
-#     str(not_full),
-#     str(cost),
-#     str(energy),
-#     str(ratio)
-# ])
-#
-# pyperclip.copy(column)
-# print("Copied column-wise to clipboard:")
-# print(column)
+Controller_df = Controller.hems_database.to_pandas()
+print(f'Final House Cost: {Controller_df["Instant Cost"].sum()}')
 
-Controller.hems_database.df.to_csv(f'./Results/controller_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
-House.simulation_df.to_csv(f'./Results/simulation_ESS-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+
+Controller_df.to_csv(f'./Results/controller_ESS_RL_NSTEP-4-{TARIFF_TYPE}_{TEST_EPS}_change.csv')
+House.simulation_df.to_csv(f'./Results/simulation_ESS_RL_NSTEP-4-{TARIFF_TYPE}_{TEST_EPS}_change.csv')

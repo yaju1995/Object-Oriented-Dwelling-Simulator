@@ -8,42 +8,12 @@ from SRC.Controller.Database.PandasDatabase import DataStore
 from SRC.SIM.EquipmentClass import InverterModel, MeterModel
 from SRC.support.live_plotter import LivePlotter, LivePlotter4
 
-from SRC.Controller.ESS_controller.SafeLayer import soc_safety_layer
-
-from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent
-from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
 from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
+from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
+
 
 logger = CustomLogger(command=False, color='cyan')
 
-
-# def soc_charge_limit(state, resolution):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#     #get C rating 0.5 -> unde charging resolution will be 0.5*res/60
-#     # for 15 min it will be 0.5/4 -> 0.125 soc limit
-#     # update max min limit with C rating and battery state
-#     # 1-soc
-#     charge_limit = 0.5
-#     discharge_limit = 0.5
-#
-#     energy_limit = 0.5 * resolution / 60 # energy limit
-#     if (1-soc) < energy_limit:
-#         charge_limit = (1 - soc) *  60/resolution
-#
-#     if soc-0.05 < energy_limit:
-#         discharge_limit = (soc-0.05) * 60/ resolution
-#
-#     return np.array([-discharge_limit]), np.array([charge_limit])
-
-
-# def no_limit(state):
-#     # return np.array([-0.5]), np.array([0.5])
-#     soc = state[1]  # SOC should be 0 state
-#
-#     charge_limit = min(0.5, 1 - soc)
-#     discharge_limit = min(0.5, soc - 0.05)
-#     return np.array([-0.5]), np.array([0.5])
 
 class essController:
     def __init__(self, rl_agent: Bound_DDPGAgent, mode='Train', resolution: timedelta = timedelta(minutes=1),
@@ -209,7 +179,6 @@ class essController:
             reward = self.compute_reward(control_time)
             self.cumulative_reward += reward
 
-            # print(reward, self.cumulative_reward)
 
             # Get next state #
             self.next_state = self.get_state(control_time)  # get latest state
@@ -217,7 +186,6 @@ class essController:
             # Save transition (terminal or non-terminal)
             # pass to deque for delay reward update, update reward then add to agent store
             self.rl_agent.store_transition(self.state, self.action, reward, self.next_state, False)
-            # self.rl_agent.store_transition(self.state, self.action, reward, self.next_state)
 
             logger.commandline(control_time, self.state, self.action, reward, self.next_state, False)
             # print(control_time, self.state, self.action, reward, self.next_state, False)
@@ -315,12 +283,20 @@ class essController:
         # 3. Get tariff arrays directly
         # ==========================================================
 
-        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_array(
+        # tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_array(
+        #     control_time,
+        #     period=self.look_ahead,
+        #     resolution=self.update_period
+        # )
+
+        tariff_df = self.tariff_handler.get_tariff_range_df(
             control_time,
             period=self.look_ahead,
             resolution=self.update_period
         )
-
+        tariff_states = np.array(tariff_df['tariff'].tolist())
+        feed_tariff_states = np.array(tariff_df['feed_tariff'].tolist())
+        # print(control_time, tariff_states, feed_tariff_states)
         # ==========================================================
         # 4. Normalize tariff
         # ==========================================================
@@ -336,7 +312,7 @@ class essController:
         tariff_den = tariff_max - tariff_min
         if tariff_den == 0:
             tariff_den = 1e-8
-
+        # print(tariff_states, tariff_min, tariff_den)
         tariff = (tariff_states - tariff_min) / tariff_den
         feed_tariff = (feed_tariff_states - tariff_min) / tariff_den
 
@@ -348,17 +324,18 @@ class essController:
         # 5. Build state array
         # ==========================================================
 
-        n_tariff = len(tariff)
-        n_feed = len(feed_tariff)
+        # n_tariff = len(tariff)
+        # n_feed = len(feed_tariff)
+        #
+        # state = np.empty(2 + n_tariff + n_feed, dtype=np.float32)
+        #
+        # state[0] = soc
+        # state[1] = forecast_surplus
+        # state[2:2 + n_tariff] = tariff
+        # state[2 + n_tariff:] = feed_tariff
 
-        state = np.empty(2 + n_tariff + n_feed, dtype=np.float32)
-
-        state[0] = soc
-        state[1] = forecast_surplus
-        state[2:2 + n_tariff] = tariff
-        state[2 + n_tariff:] = feed_tariff
-
-        return state
+        # return state
+        return np.array([soc, forecast_surplus,*tariff,*feed_tariff])
 
     def compute_reward(self, control_time: datetime):  # replace control time wiht self time??
 

@@ -5,7 +5,7 @@ from typing import Optional
 from SRC.support.lib_config import CustomLogger
 from SRC.SIM.Tariff.TariffGenerator import BaseTariffGenerator
 
-logger = CustomLogger(command=False)
+logger = CustomLogger(command=True)
 
 
 def time_to_seconds(t) -> int:
@@ -91,6 +91,7 @@ class tariffHandler:
         """
         Generates next-day/next-24h tariffs into the staging buffers.
         """
+
         if self.tariff_model is not None:
             self.next_24hr_tariff = self.tariff_model.generate_tariff()
 

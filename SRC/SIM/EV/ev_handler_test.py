@@ -17,7 +17,7 @@ def main():
     # -------------------------------------------------
     ev = EVHandler(
         name="EV_1",
-        ev_profile_csv="pdf_Veh1_Level0.csv",   # raw CSV used by generator
+        ev_profile_csv="./SRC/SIM/Defaults/EV/pdf_Veh1_Level0.csv",   # raw CSV used by generator
         start_time=start_time,
         resolution=resolution,
         duration=duration,
@@ -26,8 +26,12 @@ def main():
         discharging_power_W=7_400,          # V2G capable
         v2g_enabled=False,
         seed=100,
+        upper_limit_soc_pct=100,
+        lower_limit_soc_pct=20
     )
+    print(ev.ev_df)
     ev.upload_ev_df_from_csv('test_data.csv')
+
     # -------------------------------------------------
     # Simulation loop
     # -------------------------------------------------

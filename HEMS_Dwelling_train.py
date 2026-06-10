@@ -190,5 +190,6 @@ print(f"Simulation took {duration:.4f} seconds")
 # print('')
 # print(f'Final House Cost: {Controller.hems_database.df["Instant Cost"].sum()}')
 
-Controller.hems_database.df.to_csv('./Results/controller_train_EV_V2G.csv')
+controller_results = Controller.hems_database.to_pandas()
+controller_results.to_csv('./Results/controller_train_EV_V2G.csv')
 House.simulation_df.to_csv('./Results/simulation_train_EV_V2G.csv')

@@ -13,7 +13,7 @@ EV_DDPG_config.seed = 0
 EV_LOOK_AHEAD = 1  # If you update this try to match the input state with this
 EV_INPUT_DIM = 3 + EV_LOOK_AHEAD  # try to match the observed state with delay steps
 EV_OUT_DIM = 1
-EV_MODEL_DIR = f'Models/EV/Trial/n_step_{EV_LOOK_AHEAD}_setup_1/Seed_{EV_DDPG_config.seed}/'
+EV_MODEL_DIR = f'Models/EV/Fast/n_step_{EV_LOOK_AHEAD}_setup_1/Seed_{EV_DDPG_config.seed}/'
 EV_MODEL_NAME = f'states_{EV_INPUT_DIM}_delay_{EV_LOOK_AHEAD}_700eps.pth'
 
 

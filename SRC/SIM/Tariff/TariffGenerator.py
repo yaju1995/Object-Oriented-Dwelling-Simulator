@@ -84,6 +84,7 @@ class RandomTariffGenerator(BaseTariffGenerator):
 
 if __name__ == '__main__':
     # gen = UniformTariffGenerator(value=0.12, resolution=timedelta(minutes=60))
-    gen = RandomTariffGenerator(low=0.1, high=0.5, resolution=timedelta(minutes=60))
+    gen = RandomTariffGenerator(low=0.1, high=0.5, resolution=timedelta(minutes=60),seed=0)
     tariff = gen.generate_tariff()
-    print(tariff)
+    tariff2 = gen.generate_tariff()
+    print(tariff,tariff2)
