@@ -1,13 +1,12 @@
 import pandas as pd
-import numpy as np
+
 from datetime import timedelta, datetime
 
-# from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent
-# from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent
-from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent
+
 from SRC.support.lib_config import CustomLogger
 from SRC.SIM.EquipmentClass import EVModel
-from SRC.Controller.Database.PandasDatabase import DataStore
+
+from SRC.Controller.Database.numpyDatabase import DataStore
 from SRC.support.live_plotter import LivePlotter4
 
 from SRC.SIM.Tariff.tariffHandler import tariffHandler
@@ -61,7 +60,7 @@ class evController:
         self.period_charging_cost = 0
         self.ev_sessions_charging_energy = 0
         self.ev_sessions_charging_cost = 0
-        self.ev_df = pd.DataFrame()
+        # self.ev_df = pd.DataFrame()
         self.set_charging_power = 1.5  # charge with minimal power
         self.ev_sessions = 0
         self.not_full_count = 0
@@ -76,17 +75,14 @@ class evController:
         self.initial_soc_list = []
         self.final_soc_list = []
         self.duration_list = []
-        self.multiPlotter = LivePlotter4(['Cost per kWh', 'change SoC', 'Final SOC', 'Overall $/kwh'],
-                                         xlabels=['Episode', 'Episode', 'Episode', 'Episode'],
-                                         ylabels=['$/kWh', 'SoC/min', 'SOC%', '$/kwh'])
-        self.enable_plotter = enable_plotter
+
 
     def update_status(self, ev_info: EVModel):
 
         # --- Update EV dataframe ---
-        self.ev_df = pd.concat(
-            [self.ev_df, pd.DataFrame([ev_info.model_dump()]).set_index("time")]
-        )
+        # self.ev_df = pd.concat(
+        #     [self.ev_df, pd.DataFrame([ev_info.model_dump()]).set_index("time")]
+        # )
 
         tariff, feed_tariff = self.tariff_handler.get_tariff(ev_info.time)
         self.instant_tariff = tariff
@@ -111,8 +107,8 @@ class evController:
         else:
             if self.connection_status:  # just disconnected end session
                 # Print disconnection header
-                logger.commandline(f"Car disconnected at {ev_info.time}")
-                logger.commandline(f"Final reading → Power: {ev_info.ev_power:.2f} kW, SOC: {ev_info.ev_soc:.1f}%")
+                # logger.commandline(f"Car disconnected at {ev_info.time}")
+                # logger.commandline(f"Final reading → Power: {ev_info.ev_power:.2f} kW, SOC: {ev_info.ev_soc:.1f}%")
 
                 self.connection_status = False
                 self.leave_time = ev_info.time
@@ -139,30 +135,25 @@ class evController:
                 self.unsatified_energy += (1 - self.final_soc)
                 self.satisfied_energy += self.final_soc
                 self.duration_list.append(session_minutes)
-                if self.enable_plotter:
-                    self.multiPlotter.update(
-                        [safe_div(self.ev_sessions_charging_cost, self.ev_sessions_charging_energy),
-                         soc_change_rate, self.final_soc * 100,
-                         self.total_ev_charging_cost / self.total_ev_charging_energy])
 
-                summary = (
-                    "\n===== EV Charging Session Summary =====\n"
-                    f"Arrival time:    {self.connect_time}\n"
-                    f"Departure time:  {self.leave_time}\n"
-                    f"Session length:  {session_minutes} minutes\n"
-                    f"Initial SOC:     {self.initial_soc * 100:.1f}%\n"
-                    f"Final SOC:       {self.final_soc * 100:.1f}%\n"
-                    f"Energy charged:  {self.ev_sessions_charging_energy:.3f} kWh\n"
-                    f"Total cost:      €{self.ev_sessions_charging_cost:.3f}\n"
-                    f"Time to full:    {full_charge_minutes} minutes\n"
-                    f"Data points:     {len(self.ev_df)}\n"
-                    f"SOC Rate change: {soc_change_rate}\n"
-                    f"Overall cost : {self.total_ev_charging_cost}\n"
-                    f"Overall energy : {self.total_ev_charging_energy}\n"
-                    "=======================================\n"
-                )
-
-                logger.commandline(summary)
+                # summary = (
+                #     "\n===== EV Charging Session Summary =====\n"
+                #     f"Arrival time:    {self.connect_time}\n"
+                #     f"Departure time:  {self.leave_time}\n"
+                #     f"Session length:  {session_minutes} minutes\n"
+                #     f"Initial SOC:     {self.initial_soc * 100:.1f}%\n"
+                #     f"Final SOC:       {self.final_soc * 100:.1f}%\n"
+                #     f"Energy charged:  {self.ev_sessions_charging_energy:.3f} kWh\n"
+                #     f"Total cost:      €{self.ev_sessions_charging_cost:.3f}\n"
+                #     f"Time to full:    {full_charge_minutes} minutes\n"
+                #     f"Data points:     {len(self.ev_df)}\n"
+                #     f"SOC Rate change: {soc_change_rate}\n"
+                #     f"Overall cost : {self.total_ev_charging_cost}\n"
+                #     f"Overall energy : {self.total_ev_charging_energy}\n"
+                #     "=======================================\n"
+                # )
+                #
+                # logger.commandline(summary)
 
             return None  # If EV not connected return None
         # ===============================================================

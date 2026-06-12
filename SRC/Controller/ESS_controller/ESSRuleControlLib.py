@@ -1,23 +1,23 @@
 import pandas as pd
 import numpy as np
+# from time import perf_counter
+
 from datetime import timedelta
 from SRC.support.lib_config import CustomLogger
-from SRC.Controller.Database.PandasDatabase import DataStore
+
 from SRC.SIM.EquipmentClass import InverterModel, MeterModel
 
-logger = CustomLogger(command=True, color='red')
+logger = CustomLogger(command=False, color='red')
 
 
 class essController:
     def __init__(self, resolution: timedelta = timedelta(minutes=1),
                  update_period: timedelta = timedelta(minutes=60),
-                 global_database: DataStore = None,
                  max_charging_kw=7,
                  max_discharging_kw=7,
                  look_ahead=1):
         self.resolution: timedelta = resolution
         self.update_period = update_period
-        self.global_databased = global_database
         self.look_ahead = look_ahead
         #############################################################
         self.max_charging_power = max_charging_kw
@@ -115,6 +115,7 @@ class essController:
         #
         #     # action = self.convertAction(energy_import)
         #     return energy_import
+
 
     def save(self):
         return f'No model to save!!!'

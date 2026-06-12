@@ -1,4 +1,5 @@
 from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent, DDPGConfig
+# from SRC.Controller.DDPGmodel.DDPG_Agent_multistep_optimized import DDPGAgent, DDPGConfig
 from torch import nn
 
 EV_DDPG_config = DDPGConfig()
@@ -17,11 +18,11 @@ EV_MODEL_DIR = f'Models/EV/Fast/n_step_{EV_LOOK_AHEAD}_setup_1/Seed_{EV_DDPG_con
 EV_MODEL_NAME = f'states_{EV_INPUT_DIM}_delay_{EV_LOOK_AHEAD}_700eps.pth'
 
 
-# EV_RL_AGENT = DDPGAgent(name='EVagent',
-#                         obs_dim=EV_INPUT_DIM,
-#                         act_dim=EV_OUT_DIM,
-#                         cfg=EV_DDPG_config,
-#                         n_step=EV_LOOK_AHEAD, #imp
-#                         return_mode='nstep')
+EV_RL_AGENT = DDPGAgent(name='EVagent',
+                        obs_dim=EV_INPUT_DIM,
+                        act_dim=EV_OUT_DIM,
+                        cfg=EV_DDPG_config,
+                        n_step=EV_LOOK_AHEAD, #imp
+                        return_mode='nstep')
 
-EV_RL_AGENT = None
+# EV_RL_AGENT = None

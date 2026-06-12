@@ -1,16 +1,18 @@
 import pandas as pd
 import numpy as np
 from datetime import timedelta, datetime
+from time import perf_counter
 
 # from SRC.Controller.DDPGmodel.DDPG_Agent import DDPGAgent
 # from SRC.Controller.DDPGmodel.DDPG_Agent_n_step import DDPGAgent
 from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent
+
 from SRC.support.lib_config import CustomLogger
 from SRC.SIM.EquipmentClass import EVModel
 from SRC.Controller.Database.PandasDatabase import DataStore
 from SRC.support.live_plotter import LivePlotter4
 
-from SRC.SIM.Tariff.tariffHandler import tariffHandler
+from SRC.SIM.Tariff.tariffHandler_V_2_numpy import tariffHandler
 
 ##############################
 logger = CustomLogger(command=False, color='green')
@@ -36,7 +38,7 @@ class evController:
         self.mode = mode
         self.max_charging_power = max_charging_power
         self.ev_battery_capacity = ev_battery_capacity
-        self.chg_time_constant = (ev_battery_capacity / max_charging_power) *60 # in mins
+        self.chg_time_constant = (ev_battery_capacity / max_charging_power) * 60  # in mins
 
         self.look_ahead = look_ahead
         ########################################################
@@ -79,7 +81,6 @@ class evController:
         self.period_charging_cost = 0
         self.ev_sessions_charging_energy = 0
         self.ev_sessions_charging_cost = 0
-        self.ev_df = pd.DataFrame()
         self.set_charging_power = 1.5  # charge with minimal power
         self.ev_sessions = 0
         self.not_full_count = 0
@@ -109,11 +110,6 @@ class evController:
         # self.plotter3 = LivePlotter('Final SOC', 'Episode', 'SOC')
 
     def update_status(self, ev_info: EVModel):
-
-        # --- Update EV dataframe ---
-        self.ev_df = pd.concat(
-            [self.ev_df, pd.DataFrame([ev_info.model_dump()]).set_index("time")]
-        )
 
         tariff, feed_tariff = self.tariff_handler.get_tariff(ev_info.time)
         self.instant_tariff = tariff
@@ -178,24 +174,24 @@ class evController:
                     # self.plotter1.update(self.ev_sessions_charging_cost / self.ev_sessions_charging_energy)
                     # self.plotter2.update(soc_change_rate)
                     # self.plotter3.update(self.final_soc*100)
-                summary = (
-                    "\n===== EV Charging Session Summary =====\n"
-                    f"Arrival time:    {self.connect_time}\n"
-                    f"Departure time:  {self.leave_time}\n"
-                    f"Session length:  {session_minutes} minutes\n"
-                    f"Initial SOC:     {self.initial_soc * 100:.1f}%\n"
-                    f"Final SOC:       {self.final_soc * 100:.1f}%\n"
-                    f"Energy charged:  {self.ev_sessions_charging_energy:.3f} kWh\n"
-                    f"Total cost:      €{self.ev_sessions_charging_cost:.3f}\n"
-                    f"Time to full:    {full_charge_minutes} minutes\n"
-                    f"Data points:     {len(self.ev_df)}\n"
-                    f"SOC Rate change: {soc_change_rate}\n"
-                    f"Overall cost : {self.total_ev_charging_cost}\n"
-                    f"Overall energy : {self.total_ev_charging_energy}\n"
-                    "=======================================\n"
-                )
-
-                logger.commandline(summary)
+                # summary = (
+                #     "\n===== EV Charging Session Summary =====\n"
+                #     f"Arrival time:    {self.connect_time}\n"
+                #     f"Departure time:  {self.leave_time}\n"
+                #     f"Session length:  {session_minutes} minutes\n"
+                #     f"Initial SOC:     {self.initial_soc * 100:.1f}%\n"
+                #     f"Final SOC:       {self.final_soc * 100:.1f}%\n"
+                #     f"Energy charged:  {self.ev_sessions_charging_energy:.3f} kWh\n"
+                #     f"Total cost:      €{self.ev_sessions_charging_cost:.3f}\n"
+                #     f"Time to full:    {full_charge_minutes} minutes\n"
+                #     f"Data points:     {len(self.ev_df)}\n"
+                #     f"SOC Rate change: {soc_change_rate}\n"
+                #     f"Overall cost : {self.total_ev_charging_cost}\n"
+                #     f"Overall energy : {self.total_ev_charging_energy}\n"
+                #     "=======================================\n"
+                # )
+                #
+                # logger.commandline(summary)
 
             return None  # If EV not connected return None
         # ===============================================================
@@ -217,7 +213,6 @@ class evController:
         # --- Compute incremental energy PER STEP ---
         # Energy [kWh] = kW * (minutes / 60)
         step_energy = round(self.instant_power * (self.resolution.total_seconds() / 3600), 6)
-        # logger.commandline(self.resolution, self.resolution.total_seconds()/ 3600)
 
         self.period_charging_energy += step_energy
         self.ev_sessions_charging_energy += step_energy
@@ -339,6 +334,146 @@ class evController:
         # logger.commandline(f'Getting action {self.action}')
         return
 
+    def control_logic(self, control_time: datetime, done):  # ddpg logic control_time is now time
+
+        t_total = perf_counter()
+
+        t_reward = 0.0
+        t_avg = 0.0
+        t_next_state = 0.0
+        t_store = 0.0
+        t_log = 0.0
+        t_train = 0.0
+        t_done = 0.0
+        t_state_update = 0.0
+        t_choose = 0.0
+        t_full_check = 0.0
+
+        # ==========================================================
+        # If we have a previous state-action pair, compute reward and update RL
+        # ==========================================================
+        if self.state is not None and self.action is not None:
+
+            # Get reward
+            t = perf_counter()
+            reward = self.compute_reward()
+            t_reward = (perf_counter() - t) * 1000
+
+            t = perf_counter()
+            self.eps_count += 1
+            self.cumulative_reward += reward
+            self.avg_reward = self.cumulative_reward / self.eps_count
+            t_avg = (perf_counter() - t) * 1000
+
+            # Get next state
+            t = perf_counter()
+            self.next_state = self.get_state(control_time)
+            t_next_state = (perf_counter() - t) * 1000
+
+            # Save transition
+            t = perf_counter()
+            self.rl_agent.store_transition(
+                self.state,
+                self.action,
+                reward,
+                self.next_state,
+                done
+            )
+            t_store = (perf_counter() - t) * 1000
+
+            t = perf_counter()
+            logger.commandline(
+                f"Control Time {control_time},"
+                f"{self.state}, {self.action}, {reward}, {self.next_state}, {done}"
+            )
+            t_log = (perf_counter() - t) * 1000
+
+            # Train agent
+            if self.mode == "Train":
+                t = perf_counter()
+                self.rl_agent.train()
+                t_train = (perf_counter() - t) * 1000
+
+        # ==========================================================
+        # If EV disconnected, reset action/state
+        # ==========================================================
+        if done:
+            t = perf_counter()
+
+            self.state = None
+            self.action = None
+            self.reward = None
+            self.next_state = None
+            self.action = 0
+
+            t_done = (perf_counter() - t) * 1000
+            t_total_ms = (perf_counter() - t_total) * 1000
+
+            # print(
+            #     f"EV control_logic | "
+            #     f"reward={t_reward:.4f} ms | "
+            #     f"avg={t_avg:.4f} ms | "
+            #     f"next_state={t_next_state:.4f} ms | "
+            #     f"store={t_store:.4f} ms | "
+            #     f"log={t_log:.4f} ms | "
+            #     f"train={t_train:.4f} ms | "
+            #     f"done_reset={t_done:.4f} ms | "
+            #     f"state_update={t_state_update:.4f} ms | "
+            #     f"choose={t_choose:.4f} ms | "
+            #     f"full_check={t_full_check:.4f} ms | "
+            #     f"total={t_total_ms:.4f} ms"
+            # )
+
+            return
+
+        # ==========================================================
+        # Update state for next action
+        # ==========================================================
+        t = perf_counter()
+
+        if self.next_state is not None:
+            self.state = self.next_state
+        else:
+            self.state = self.get_state(control_time)
+
+        t_state_update = (perf_counter() - t) * 1000
+
+        # ==========================================================
+        # Choose next action
+        # ==========================================================
+        if self.mode == "Train":
+            noise = 0.1
+        else:
+            noise = 0.0
+
+        t = perf_counter()
+        self.action = self.rl_agent.choose_action(self.state, noise_std=noise)
+        t_choose = (perf_counter() - t) * 1000
+
+        t = perf_counter()
+        if self.full_charge_status:
+            self.action = np.array([0])
+        t_full_check = (perf_counter() - t) * 1000
+
+        t_total_ms = (perf_counter() - t_total) * 1000
+
+        print(
+            f"EV control_logic | "
+            f"reward={t_reward:.4f} ms | "
+            f"avg={t_avg:.4f} ms | "
+            f"next_state={t_next_state:.4f} ms | "
+            f"store={t_store:.4f} ms | "
+            f"log={t_log:.4f} ms | "
+            f"train={t_train:.4f} ms | "
+            f"done_reset={t_done:.4f} ms | "
+            f"state_update={t_state_update:.4f} ms | "
+            f"choose={t_choose:.4f} ms | "
+            f"full_check={t_full_check:.4f} ms | "
+            f"total={t_total_ms:.4f} ms"
+        )
+
+        return
+
     def get_state(self, control_time: datetime):
         """
         Get info from storage
@@ -356,13 +491,10 @@ class evController:
         soc = self.instant_soc
 
         # next period oven period tariff
-        tariff_df = self.tariff_handler.get_tariff_range_df(control_time, period=self.look_ahead,
-                                                            resolution=self.update_period)
 
-        # print(tariff_df)
-        tariff_states = tariff_df['tariff'].tolist()
-        # feed_tariff_states = tariff_df['feed_tariff'].tolist()
-        # print(control_time, soc, tariff_states)
+        tariff_states, _ = self.tariff_handler.get_tariff_range_array(control_time,
+                                                                      period=self.look_ahead,
+                                                                      resolution=self.update_period)
 
         tariff_states = np.array(tariff_states)
         tariff_max = self.tariff_handler.max_tariff
@@ -371,25 +503,6 @@ class evController:
 
         W1 = self.weight_info()
 
-        # Get time
-        # control_minutes = control_time.hour * 60 + control_time.minute
-        # angle = 2 * np.pi * (control_minutes / (24 * 60))
-
-        # sin_time = np.sin(angle)
-        # cos_time = np.cos(angle)
-        #
-        # # time to full charge
-        # if self.connect_period is None:
-        #     connect_minutes = 0
-        # else:
-        #     connect_minutes = int(self.connect_period.total_seconds() // 60)
-        #
-        # connect_norm = connect_minutes / 1440  # ~0–1 given a 24 hrs
-
-        # Additional possible inputs: tariff, time of day, remaining time estimate ...
-        # Finalize the EV states
-        # Time of day min
-        # Weekday and weekend
         return np.array([soc, self.ev_status, W1, *tariff], dtype=float)
 
     def compute_reward(self):
@@ -414,7 +527,7 @@ class evController:
 
     def weight_info(self):
 
-        remain_time = int(self.remain_time_dc.total_seconds() // 60) # To hours
+        remain_time = int(self.remain_time_dc.total_seconds() // 60)  # To hours
 
         min_time_exp_soc = int(self.min_time_exp_soc)
         # logger.commandline(self.remain_time_dc, remain_time, min_time_exp_soc)
@@ -434,7 +547,7 @@ class evController:
 
     def save_model(self, path):
         # Ensure the directory exists
-        return(self.rl_agent.save(path))
+        return (self.rl_agent.save(path))
 
     def load_model(self, path):
-        return(self.rl_agent.load(path))
+        return (self.rl_agent.load(path))

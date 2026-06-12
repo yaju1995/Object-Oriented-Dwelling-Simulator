@@ -184,7 +184,7 @@ class EVHandler(ESSHandler):
         self,
         timestamp: datetime,
         control_power_W: Optional[float] = 0,
-    ) -> dict:
+    ) -> dict|tuple:
         """
         Advance EV by one timestep.
         """
@@ -243,23 +243,33 @@ class EVHandler(ESSHandler):
         # -------------------------------------------------
         # ESS update
         # -------------------------------------------------
-        out = self.update(
+        ev_soc, ev_power_kw, ev_set_power_kw = self.update(
             power_setpoint_W=power_setpoint_W,
             timestamp=timestamp,
         )
+        ev_soc =  ev_soc if plugged else 0.0
+        ################################################################
+        # ev_power_kw = out["Battery Electric Power (kW)"]
+        # ev_set_power_kw = out["Battery Set Power (kW)"]
+        # ev_soc = out["Battery SOC (-)"] if plugged else 0.0
 
-        ev_power_kw = out["Battery Electric Power (kW)"]
-        ev_set_power_kw = out["Battery Set Power (kW)"]
-        ev_soc = out["Battery SOC (-)"] if plugged else 0.0
+        # return {
+        #     "EV Electric Power (kW)": ev_power_kw,
+        #     "EV Set Power (kW)": ev_set_power_kw,
+        #     "EV SOC (-)": ev_soc,
+        #     "EV Parked": 1 if plugged else 0,
+        #     "User Plug Out Time": self.user_set_plugout,
+        #     "Expected SOC": self.expected_soc,
+        # }
 
-        return {
-            "EV Electric Power (kW)": ev_power_kw,
-            "EV Set Power (kW)": ev_set_power_kw,
-            "EV SOC (-)": ev_soc,
-            "EV Parked": 1 if plugged else 0,
-            "User Plug Out Time": self.user_set_plugout,
-            "Expected SOC": self.expected_soc,
-        }
+        return (
+            ev_power_kw,
+            ev_set_power_kw,
+            ev_soc,
+            1 if plugged else 0,
+            self.user_set_plugout,
+            self.expected_soc,
+        )
 
     # ==================================================================
     # EV SOC

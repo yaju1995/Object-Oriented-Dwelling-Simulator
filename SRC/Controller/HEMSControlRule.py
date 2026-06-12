@@ -1,12 +1,12 @@
 import pandas as pd
 from datetime import timedelta
-from torch import nn
+# from time import perf_counter
 
 from SRC.SIM import *
 from SRC.SIM.EquipmentClass import InverterModel, EVModel, HVACModel, MeterModel
 from SRC.SIM.ControlSignalHandler import ControlSignal
-# from SRC.Controller.Database.PandasDatabase import DataStore
 from SRC.Controller.Database.numpyDatabase import DataStore  # Using numpy array
+
 
 from .Constants import COLUMNS_KEYS
 
@@ -69,8 +69,7 @@ class HEMSController:
         self.hvac_config = hvac_config
         # Ev Rule controller
         self.ev_controller = evController(resolution=self.resolution,
-                                           update_period=self.ev_update_period,
-                                           global_database=self.hems_database, mode=mode,
+                                           update_period=self.ev_update_period, mode=mode,
                                            max_charging_power=ev_config.get('charging power W', 7_000) / 1000)
         #
         if self.ev_controller is not None:
@@ -81,7 +80,6 @@ class HEMSController:
         # RULE based Controller ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         self.ess_controller = essController(resolution=self.resolution,
                                             update_period=self.ess_update_period,
-                                            global_database=self.hems_database,
                                             max_charging_kw=ess_config.get('charging power W', 1000) / 1000,
                                             max_discharging_kw=ess_config.get("discharging power W", 1000) / 1000,
                                             )
@@ -168,6 +166,9 @@ class HEMSController:
         # logger.commandline(control_signal)
         # return the generated signal
         return control_signal
+
+    def control(self):
+        pass
 
     def save_models(self, episode=None):
         logger.commandline('No model to save !!!')

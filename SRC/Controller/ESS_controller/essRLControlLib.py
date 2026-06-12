@@ -8,7 +8,6 @@ from SRC.Controller.Database.PandasDatabase import DataStore
 from SRC.SIM.EquipmentClass import InverterModel, MeterModel
 from SRC.support.live_plotter import LivePlotter, LivePlotter4
 
-from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
 from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
 
 
@@ -141,13 +140,13 @@ class essController:
 
         instant_power = inverter_info.battery_power
         step_energy = round(instant_power * (self.resolution.total_seconds() / 3600), 6)
-        tariff, feed_tariff = self.tariff_handler.get_tariff(meter_info.time)
-        if step_energy > 0:
-            self.total_ess_charging_energy += abs(step_energy)
-            self.total_ess_charging_cost += round(abs(step_energy) * tariff, 6)
-        else:
-            self.total_ess_discharging_energy += abs(step_energy)
-            self.total_ess_discharging_cost += round(abs(step_energy) * tariff, 6)
+        # tariff, feed_tariff = self.tariff_handler.get_tariff(meter_info.time)
+        # if step_energy > 0:
+        #     self.total_ess_charging_energy += abs(step_energy)
+        #     self.total_ess_charging_cost += round(abs(step_energy) * tariff, 6)
+        # else:
+        #     self.total_ess_discharging_energy += abs(step_energy)
+        #     self.total_ess_discharging_cost += round(abs(step_energy) * tariff, 6)
 
         if next_time.time() == time(0, 0, 0):
             done = True
@@ -288,14 +287,17 @@ class essController:
         #     period=self.look_ahead,
         #     resolution=self.update_period
         # )
-
-        tariff_df = self.tariff_handler.get_tariff_range_df(
-            control_time,
-            period=self.look_ahead,
-            resolution=self.update_period
-        )
-        tariff_states = np.array(tariff_df['tariff'].tolist())
-        feed_tariff_states = np.array(tariff_df['feed_tariff'].tolist())
+        tariff_states, feed_tariff_states = self.tariff_handler.get_tariff_range_array(control_time,
+                                                                            period=self.look_ahead,
+                                                                            resolution=self.update_period
+                                                                        )
+        # tariff_df = self.tariff_handler.get_tariff_range_df(
+        #     control_time,
+        #     period=self.look_ahead,
+        #     resolution=self.update_period
+        # )
+        # tariff_states = np.array(tariff_df['tariff'].tolist())
+        # feed_tariff_states = np.array(tariff_df['feed_tariff'].tolist())
         # print(control_time, tariff_states, feed_tariff_states)
         # ==========================================================
         # 4. Normalize tariff
@@ -315,24 +317,6 @@ class essController:
         # print(tariff_states, tariff_min, tariff_den)
         tariff = (tariff_states - tariff_min) / tariff_den
         feed_tariff = (feed_tariff_states - tariff_min) / tariff_den
-
-        # Optional: only use round if you really need it
-        # tariff = np.round(tariff, 3)
-        # feed_tariff = np.round(feed_tariff, 3)
-
-        # ==========================================================
-        # 5. Build state array
-        # ==========================================================
-
-        # n_tariff = len(tariff)
-        # n_feed = len(feed_tariff)
-        #
-        # state = np.empty(2 + n_tariff + n_feed, dtype=np.float32)
-        #
-        # state[0] = soc
-        # state[1] = forecast_surplus
-        # state[2:2 + n_tariff] = tariff
-        # state[2 + n_tariff:] = feed_tariff
 
         # return state
         return np.array([soc, forecast_surplus,*tariff,*feed_tariff])

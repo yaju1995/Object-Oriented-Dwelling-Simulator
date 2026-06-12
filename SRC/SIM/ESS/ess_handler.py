@@ -192,16 +192,16 @@ class ESSHandler:
         # t1 = perf_counter()
         # print(f"battery step : {(t1-t0)* 1000:.3f} ms | ")
         # ---------- Return contract ----------
-        return {
-            'Battery SOC (-)': round(self.getStateOfCharge() / 100.0, 6),
-            'Battery Electric Power (kW)': round(actual_power_W / 1000.0, 6),
-            'Battery Set Power (kW)': round(power_setpoint_W/1000, 6)
-        }
-        # batt_soc = round(self.getStateOfCharge() / 100.0, 6)
-        # batt_power = round(actual_power_W / 1000.0, 6)
-        # batt_set_power = round(power_setpoint_W/1000, 6)
+        # return {
+        #     'Battery SOC (-)': round(self.getStateOfCharge() / 100.0, 6),
+        #     'Battery Electric Power (kW)': round(actual_power_W / 1000.0, 6),
+        #     'Battery Set Power (kW)': round(power_setpoint_W/1000, 6)
+        # }
+        batt_soc = round(self.getStateOfCharge() / 100.0, 6)
+        batt_power = round(actual_power_W / 1000.0, 6)
+        batt_set_power = round(power_setpoint_W/1000, 6)
 
-        # return batt_soc,batt_power,batt_set_power
+        return batt_soc,batt_power,batt_set_power
 
 
     # ------------------------------------------------------------------

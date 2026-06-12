@@ -17,13 +17,15 @@ from SRC.SIM.Simulator_Config.config_list_train import (
 )
 
 from SRC.Controller.HEMSControlRL import HEMSController
+# from SRC.Controller.HEMSControlRule import HEMSController
+
 from SRC.SIM.Tariff.TariffGenerator import RandomTariffGenerator
 
 # ============================================================
 # Simulation settings
 # ============================================================
 
-RES = 60
+RES = 15
 RESOLUTION = timedelta(minutes=RES)
 DURATION = timedelta(days=5000)
 START_TIME = datetime(2018, 1, 1, 0, 0)
@@ -88,8 +90,8 @@ House = dwelling(
     weather_file=None,
     pv_config=pv_config,
     battery_config=battery_config,
-    ev_config=None,
-    thermal_config=None,
+    ev_config=ev_config,
+    thermal_config=thermal_config,
     seed=SEED,
 )
 
@@ -127,9 +129,9 @@ Controller = HEMSController(
     ev_update_period=RESOLUTION,
     ess_update_period=RESOLUTION,
     havc_update_period=RESOLUTION,
-    ev_config=None,
+    ev_config=ev_config,
     ess_config=battery_config,
-    hvac_config=None,
+    hvac_config=thermal_config,
 )
 
 # Controller.load_models()
@@ -161,6 +163,8 @@ while current_time <= end_time - RESOLUTION:
     # ------------------------------------------------------------
     # Forecast for next control period [add forecasting model]
     # ------------------------------------------------------------
+    # need to add forecasting model [MPC controller + MILP]
+
     demand_forecast, generation_forecast = get_next_forecast_from_arrays(House)
 
     inverter.forecast_demand = demand_forecast

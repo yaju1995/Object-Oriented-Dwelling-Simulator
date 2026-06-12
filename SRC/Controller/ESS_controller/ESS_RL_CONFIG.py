@@ -1,9 +1,9 @@
-from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import DDPGConfig
-from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
+from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import DDPGConfig, Bound_DDPGAgent
+# from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep_optimized import DDPGConfig, Bound_DDPGAgent
 from torch import nn
 
 ESS_DDPG_config = DDPGConfig()
-ESS_DDPG_config.gamma = 0.99
+ESS_DDPG_config.gamma = 0.90
 ESS_DDPG_config.actor_lr = 1e-3
 ESS_DDPG_config.critic_lr = 1e-3
 ESS_DDPG_config.hidden = (256,128)  # need to keep this fixed

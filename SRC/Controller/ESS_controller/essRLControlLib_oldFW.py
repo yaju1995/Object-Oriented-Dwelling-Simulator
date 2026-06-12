@@ -6,11 +6,9 @@ from SRC.Controller.Database.PandasDatabase import DataStore
 from SRC.SIM.EquipmentClass import InverterModel, MeterModel
 from SRC.support.live_plotter import LivePlotter, LivePlotter4
 
-from SRC.Controller.ESS_controller.SafeLayer import soc_safety_layer
 
-from SRC.Controller.DDPGmodel.DDPG_Agent_multistep import DDPGAgent
 from SRC.Controller.DDPGmodel.bounded_DDPG_Agent_multistep import Bound_DDPGAgent
-from SRC.Controller.DDPGmodel.DDGP_Bound_Agent_old import DPGAgent
+
 
 logger = CustomLogger(command=False, color='cyan')
 

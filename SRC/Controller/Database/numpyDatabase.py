@@ -185,6 +185,73 @@ class DataStore:
 
             return result
 
+    def get_past_period_n_data(
+            self,
+            keys: list[str],
+            period: int,
+            *,
+            now_time: datetime | np.datetime64 | None = None,
+            strict: bool = True,
+            include_time: bool = True,
+    ) -> dict[str, np.ndarray] | None:
+        """
+        Return past N rows for selected keys, ending at now_time.
+
+        If now_time is provided:
+            returns rows up to the latest row where time <= now_time.
+
+        If now_time is None:
+            returns the latest N appended rows.
+
+        Returns:
+            dict[str, np.ndarray] or None
+
+        Example:
+            past = db.get_past_period_n_data(
+                keys=["Battery SOC (-)", "Total Electric Power (kW)"],
+                n=96,
+                now_time=current_time,
+            )
+        """
+
+        if period <= 0:
+            raise ValueError("n must be positive")
+
+        with self.lock:
+            if self.size == 0:
+                return None
+
+            missing = set(keys) - set(self.data.keys())
+
+            if missing and strict:
+                raise KeyError(f"Missing past-period keys: {missing}")
+
+            if now_time is None:
+                end_idx = self.size - 1
+            else:
+                t_np = self._to_np_time(now_time)
+                valid_times = self.times[: self.size]
+
+                end_idx = np.searchsorted(valid_times, t_np, side="right") - 1
+
+                if end_idx < 0:
+                    return None
+
+            start_idx = max(0, end_idx - period + 1)
+
+            result = {}
+
+            if include_time:
+                result["time"] = self.times[start_idx: end_idx + 1].copy()
+
+            for key in keys:
+                if key in self.data:
+                    result[key] = self.data[key][start_idx: end_idx + 1].copy()
+                else:
+                    result[key] = np.full(end_idx - start_idx + 1, np.nan)
+
+            return result
+
     # ------------------------------------------------------------------
     # utility
     # ------------------------------------------------------------------

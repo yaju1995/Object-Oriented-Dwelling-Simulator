@@ -143,31 +143,58 @@ class HEMSController:
 
     def update(self, ev_info: EVModel, inverter_info: InverterModel, hvac_info: HVACModel, meter_info: MeterModel):
 
+        t_total0 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Basic calculation
+        # ------------------------------------------------------------------
+        t_basic0 = perf_counter()
+
         now_time = meter_info.time
-        # logger.commandline(f'Now time:{now_time}')
-        # Consumption power
-        consumption = round(meter_info.active_power - inverter_info.battery_power + inverter_info.pv_power, 3)
+
+        consumption = round(
+            meter_info.active_power
+            - inverter_info.battery_power
+            + inverter_info.pv_power,
+            3
+        )
+
         hours = self.resolution.total_seconds() / 3600
         minute = self.resolution.total_seconds() / 60
 
-        # Cost of consumed power
         if meter_info.active_power > 0:
             instant_cost = round(meter_info.active_power * hours * meter_info.tariff, 4)
         else:
             instant_cost = round(meter_info.active_power * hours * meter_info.feed_tariff, 4)
-        # getting attribute from controller
+
+        t_basic1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Get controller attributes
+        # ------------------------------------------------------------------
+        t_attr0 = perf_counter()
+
         user_exp_soc = 0
         user_dc_set_time = datetime(1, 1, 1, 0, 0, 0)
+
         if self.ev_controller is not None:
             user_exp_soc = self.ev_controller.user_exp_soc
             user_dc_set_time = self.ev_controller.user_dc_set_time
+
         temp_ref = 0
+
         if self.hvac_controller is not None:
             temp_ref = self.hvac_controller.temp_ref
 
-        # Storing information in HVAC
-        row = {  # Base on Constants COLUMNS_KEYS
-            'Consumption (kW)': consumption,  #Demand only (Demand + EV+ HVAC)
+        t_attr1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Row creation
+        # ------------------------------------------------------------------
+        t_row0 = perf_counter()
+
+        row = {
+            'Consumption (kW)': consumption,
             'Consumption (kWh)': consumption * hours,
             'Generation (kW)': inverter_info.pv_power,
             'Generation (kWh)': inverter_info.pv_power * hours,
@@ -195,48 +222,102 @@ class HEMSController:
             'Temperature - Indoor (C)': hvac_info.ti,
             'Heating Electric Power (kW)': hvac_info.hvac_power,
             'Heating Electric Energy (kWh)': hvac_info.hvac_power * hours,
-            'Temperature - Ref (C)': temp_ref
+            'Temperature - Ref (C)': temp_ref,
         }
-        # print(now_time, row)
 
-        # Database test ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        self.hems_database.append(now_time, row)  # First update row then collect information
+        t_row1 = perf_counter()
 
-        # EV control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ------------------------------------------------------------------
+        # Database append
+        # ------------------------------------------------------------------
+        t_db0 = perf_counter()
+
+        self.hems_database.append(now_time, row)
+
+        t_db1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # EV controller
+        # ------------------------------------------------------------------
+        t_ev0 = perf_counter()
+
         if self.ev_controller:
-            self.control_signals.EV_Max_Power = self.ev_controller.update_status(ev_info=ev_info)
+            self.control_signals.EV_Max_Power = self.ev_controller.update_status(
+                ev_info=ev_info
+            )
+
+        t_ev_update1 = perf_counter()
 
         if self.control_signals.EV_Max_Power is not None:
             self.control_signals.EV_Max_Power = float(self.control_signals.EV_Max_Power) * 1000
 
-        # HVAC control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        t_ev1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # HVAC controller
+        # ------------------------------------------------------------------
+        t_hvac0 = perf_counter()
 
         if self.hvac_controller:
-            self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(hvac_info=hvac_info)
+            self.control_signals.HVAC_Heating_Power = self.hvac_controller.update_status(
+                hvac_info=hvac_info
+            )
+
+        t_hvac_update1 = perf_counter()
+
         if self.control_signals.HVAC_Heating_Power is not None:
             self.control_signals.HVAC_Heating_Power = float(self.control_signals.HVAC_Heating_Power) * 1000
 
-        # # Battery control ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        t0 = perf_counter()
+        t_hvac1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Battery / ESS controller
+        # ------------------------------------------------------------------
+        t_ess0 = perf_counter()
 
         if self.ess_controller:
-            self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(meter_info=meter_info,
-                                                                                        inverter_info=inverter_info)
+            self.control_signals.Battery_P_Setpoint = self.ess_controller.update_status(
+                meter_info=meter_info,
+                inverter_info=inverter_info
+            )
 
-        t1 = perf_counter()
+        t_ess_update1 = perf_counter()
+
         if self.control_signals.Battery_P_Setpoint is not None:
             self.control_signals.Battery_P_Setpoint = float(self.control_signals.Battery_P_Setpoint) * 1000
-        end = perf_counter()
+
+        t_ess1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Generate control signal
+        # ------------------------------------------------------------------
+        t_signal0 = perf_counter()
+
+        control_signal = self.control_signals.generate_control_signal()
+
+        t_signal1 = perf_counter()
+
+        # ------------------------------------------------------------------
+        # Print timing
+        # ------------------------------------------------------------------
+        total_ms = (perf_counter() - t_total0) * 1000.0
 
         # print(
-        #     f"ess took : {(end-t0)* 1000:.3f} ms | "
-        #     f"\nupdate took : {(t1-t0)* 1000:.3f} ms | "
-        #     f"\nset took : {(end-t1)* 1000:.3f} ms | "
-        #       )
-        # # generate controller signals ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        control_signal = self.control_signals.generate_control_signal()
-        # logger.commandline(control_signal)
-        # return the generated signal
+        #     f"Controller update | "
+        #     f"basic={((t_basic1 - t_basic0) * 1000.0):.4f} ms | "
+        #     f"attr={((t_attr1 - t_attr0) * 1000.0):.4f} ms | "
+        #     f"row={((t_row1 - t_row0) * 1000.0):.4f} ms | "
+        #     f"db={((t_db1 - t_db0) * 1000.0):.4f} ms | "
+        #     f"ev_ctrl={((t_ev_update1 - t_ev0) * 1000.0):.4f} ms | "
+        #     f"ev_convert={((t_ev1 - t_ev_update1) * 1000.0):.4f} ms | "
+        #     f"hvac_ctrl={((t_hvac_update1 - t_hvac0) * 1000.0):.4f} ms | "
+        #     f"hvac_convert={((t_hvac1 - t_hvac_update1) * 1000.0):.4f} ms | "
+        #     f"ess_ctrl={((t_ess_update1 - t_ess0) * 1000.0):.4f} ms | "
+        #     f"ess_convert={((t_ess1 - t_ess_update1) * 1000.0):.4f} ms | "
+        #     f"signal={((t_signal1 - t_signal0) * 1000.0):.4f} ms | "
+        #     f"total={total_ms:.4f} ms"
+        # )
+
         return control_signal
 
     # def get_past_period_df(self, now_time, past_period: int = 24):  # hope this will handle the resolution as well
