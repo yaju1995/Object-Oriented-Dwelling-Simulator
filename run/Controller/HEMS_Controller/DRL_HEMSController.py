@@ -12,20 +12,12 @@ from run.Controller.deep_rl.drl_agent_handler import DRLAgent, DRLAgentConfig
 class DRLControllerConfig:
     agent_class: Type[DRLAgent]
     agent_config: DRLAgentConfig
-    update_period: timedelta
-    train: bool = True
-    name: str = "DRL_HEMS_Controller"
 
 
 class DRLController(HEMSController):
     def __init__(
-            self, resolution, tariff_info, controller_config: DRLControllerConfig, ):
-        super().__init__(name=controller_config.name,
-                         resolution=resolution,
-                         tariff_info=tariff_info,
-                         train=controller_config.train,
-                         update_period=controller_config.update_period,
-                         )
+            self, name, resolution, tariff_info, train, update_period, controller_config: DRLControllerConfig, ):
+        super().__init__(name, resolution, tariff_info, train, update_period)
 
         self.controller_config = controller_config
 
@@ -50,6 +42,7 @@ class DRLController(HEMSController):
 
             self.next_state = self.get_state()
 
+            print(self.state, self.action, reward, self.next_state, done)
             self.agent.store_transition(self.state, self.action, reward, self.next_state, done)
 
             if self.train:
@@ -73,7 +66,7 @@ class DRLController(HEMSController):
         return
 
     @abstractmethod
-    def get_observation(self) -> np.array | list | dict:
+    def get_observation(self) -> np.ndarray | list | dict:
         pass
 
     @abstractmethod
@@ -81,7 +74,7 @@ class DRLController(HEMSController):
         return 0
 
     @abstractmethod
-    def get_state(self) -> np.array:
+    def get_state(self) -> np.ndarray:
         pass
 
     def save_models(self, path: str = None):

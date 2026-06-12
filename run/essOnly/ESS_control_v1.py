@@ -1,18 +1,37 @@
-from abc import ABC
-
 import numpy as np
 
-from SRC.SIM.EquipmentClass import EVModel, InverterModel, HVACModel, MeterModel
-from run.Controller.HEMS_Controller.DRL_HEMSController import DRLController
+from run.Controller.HEMS_Controller.DRL_HEMSController import DRLController, DRLControllerConfig
+
+from run.Controller.deep_rl.DDPG.DDPG_Agent_Bound import (
+    DDPGBoundAgent,
+    DDPGBoundConfig,
+)
+
+ess_agent_config = DDPGBoundConfig(
+    name="ESS_Bounded_DDPG",
+    obs_dim=4,
+    action_dim=1,
+    bound_fn=None,
+    return_mode="n_step",
+    n_step=1,
+    batch_size=128,
+    buffer_capacity=100_000,
+    gamma=0.99,
+    tau=0.005,
+    actor_lr=1e-4,
+    critic_lr=1e-4,
+    noise_std=0.1,
+)
+
+ess_controller_config = DRLControllerConfig(
+    agent_class=DDPGBoundAgent,
+    agent_config=ess_agent_config,
+)
 
 
-class ESSController(DRLController):
-    def __init__(self, name, resolution, tariff_info, train, agent, look_ahead):
-        super().__init__(name, resolution, tariff_info)
+class ESSDRLController(DRLController):
 
-        self.look_ahead = look_ahead
-
-    def get_observation(self) -> np.array | list | dict:  # only with instant observed information
+    def get_observation(self) -> np.ndarray | list | dict:  # only with instant observed information
         meter_info = self.info.meter
         inverter_info = self.info.inverter
         hvac_info = self.info.hvac
@@ -28,16 +47,16 @@ class ESSController(DRLController):
                          hvac_info.hvac_power, hvac_info.ti, hvac_info.temp_ref])
 
     def get_reward(self) -> int:
+        energy_normalizer = 10000
         control_time = self.time
 
         value = self.controller_database.get_instant_state(now_time=control_time, keys=['Instant Cost',
-                                                                                     'tariff',
-                                                                                     'feed tariff',
-                                                                                     'Total Electric Power (kW)',
-                                                                                     'Battery Set Power (W)',
-                                                                                     'Battery Electric Power (kW)'])
+                                                                                        'tariff',
+                                                                                        'feed tariff',
+                                                                                        'Total Electric Power (kW)',
+                                                                                        'Battery Set Power (W)',
+                                                                                        'Battery Electric Power (kW)'])
 
-        # print(value)
         # tariff normalization
         tariff_states = value.get('tariff')
         im_tariff_max = self.tariff_info.max_tariff
@@ -57,7 +76,7 @@ class ESSController(DRLController):
         # Normalized energy
         period_power = value.get('Total Electric Power (kW)')
         period_energy = period_power * int(self.resolution.total_seconds() // 60) / 60
-        normalized_period_energy = round(period_power / self.energy_normalizer, 6)
+        normalized_period_energy = round(period_power / energy_normalizer, 6)
 
         # Normalized reward
         if period_power >= 0:  # importing
@@ -80,7 +99,7 @@ class ESSController(DRLController):
 
         return reward
 
-    def get_state(self) -> np.array:
+    def get_state(self) -> np.ndarray:
         control_time = self.time
         forecasted_demand = self.info.inverter.forecast_demand
         forecasted_generation = self.info.inverter.forecast_generation
@@ -97,7 +116,8 @@ class ESSController(DRLController):
         forecast_surplus = round((forecasted_generation - forecasted_demand) / 15, 6)
 
         # getting next tariff
-        tariff_df = self.tariff_info.get_tariff_range_df(control_time, period=self.look_ahead,
+        tariff_df = self.tariff_info.get_tariff_range_df(control_time,
+                                                         period=self.controller_config.agent_config.n_step,
                                                          resolution=self.update_period)
         tariff_states = tariff_df['tariff'].tolist()
         feed_tariff_states = tariff_df['feed_tariff'].tolist()
@@ -114,10 +134,6 @@ class ESSController(DRLController):
 
         tariff = np.round((tariff_states - tariff_min) / (tariff_max - tariff_min), 3)  # Normalized over max and min
         feed_tariff = np.round((feed_tariff_states - tariff_min) / (tariff_max - tariff_min), 3)
-        # print(value)
-        print(
-            f'state:{control_time}:::{soc}, {surplus}, {tariff_states},->{tariff},{feed_tariff_states}->{feed_tariff}')
-        # pass
         return np.array([soc, forecast_surplus, *tariff, *feed_tariff], dtype=float)
 
     def save_models(self, path: str = None):

@@ -90,7 +90,7 @@ class HEMSController(BaseController):
         do_update = (next_time.minute % (self.update_period.total_seconds() // 60) == 0)
         '''Add controller signal'''
         if do_update:
-            self.control_logic()
+            self.control_logic(False)
 
         control_signal = self.control_signals.generate_control_signal()
 
